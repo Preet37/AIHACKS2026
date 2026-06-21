@@ -31,6 +31,13 @@
   white-space: nowrap;
 }
 
+.ds-canvas__controls {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 6px;
+  color: var(--cj-dim);
+}
+
 .ds-canvas__bar-title {
   min-width: 0;
   overflow: hidden;
@@ -48,6 +55,7 @@
   z-index: 1;
   display: grid;
   align-items: center;
+  justify-items: center;
   padding: calc(var(--cj-pane-pad) * 2);
   overflow: hidden;
   background: var(--cj-ground);
@@ -56,7 +64,7 @@
 .ds-mock-page {
   display: flex;
   flex-direction: column;
-  width: min(320px, 100%);
+  width: min(320px, calc(100% - 28px));
   min-height: min(240px, calc(100vh - 86px));
   padding: 22px 18px 18px;
   border: 1px solid var(--cj-line-strong);

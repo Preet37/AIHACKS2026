@@ -1,6 +1,13 @@
 import * as Sentry from "@sentry/browser";
 import { CONJURE_CONFIG } from "../shared/config";
 import {
+  DEFAULT_FALLBACK_HOTKEY,
+  FALLBACK_HOTKEY_STORAGE_KEY,
+  eventMatchesHotkey,
+  isEditableTarget,
+  normalizeHotkey
+} from "../shared/keybind";
+import {
   BACKGROUND_MESSAGE,
   CONTENT_MESSAGE,
   type ConsoleLevel,
@@ -38,6 +45,7 @@ let commandShadow: ShadowRoot | null = null;
 let commandOpen = false;
 let selectedSuggestion = 0;
 let overlayFontsLoaded = false;
+let fallbackHotkey = DEFAULT_FALLBACK_HOTKEY;
 
 const overlayFontUrl = (path: string) => {
   try {
@@ -82,6 +90,9 @@ const commandStyles = () => `
     --cj-accent-wash: rgba(108, 106, 245, 0.16);
     --cj-line: rgba(240, 240, 245, 0.14);
     --cj-line-strong: rgba(240, 240, 245, 0.28);
+    --cj-dur-fast: 120ms;
+    --cj-dur-med: 180ms;
+    --cj-ease: cubic-bezier(0.2, 0, 0, 1);
     all: initial;
     color-scheme: dark;
     font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
@@ -100,12 +111,14 @@ const commandStyles = () => `
     align-items: start;
     justify-items: center;
     padding-top: max(72px, 12vh);
+    animation: cj-overlay-in var(--cj-dur-med) var(--cj-ease);
   }
   .palette {
     width: min(620px, calc(100vw - 32px));
     border: 1px solid var(--cj-overlay-loud);
     background: var(--cj-surface);
     color: var(--cj-text);
+    animation: cj-palette-in var(--cj-dur-med) var(--cj-ease);
   }
   form {
     display: flex;
@@ -118,6 +131,9 @@ const commandStyles = () => `
   .marker,
   .cursor {
     color: var(--cj-accent-bright);
+  }
+  .cursor {
+    animation: cj-cursor 1s steps(1) infinite;
   }
   input {
     min-width: 0;
@@ -165,6 +181,7 @@ const commandStyles = () => `
     border-left: 1px solid var(--cj-accent);
     background: var(--cj-accent-wash);
     color: var(--cj-text);
+    animation: cj-row-settle var(--cj-dur-fast) var(--cj-ease);
   }
   .block {
     width: 9px;
@@ -199,9 +216,31 @@ const commandStyles = () => `
     font: inherit;
     color: var(--cj-dim);
   }
+  @keyframes cj-overlay-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes cj-palette-in {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes cj-cursor {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+  }
+  @keyframes cj-row-settle {
+    from { opacity: 0.72; transform: translateX(-1px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
   @media (prefers-reduced-motion: reduce) {
+    .backdrop,
+    .palette,
+    button[data-active="true"] {
+      animation: none;
+    }
     .cursor {
       opacity: 1;
+      animation: none;
     }
   }
 `;
@@ -399,6 +438,38 @@ const openCommandBar = () => {
   renderCommandBar();
 };
 
+const loadFallbackHotkey = () => {
+  if (!isRuntimeAvailable() || !chrome.storage?.local) return;
+  chrome.storage.local
+    .get(FALLBACK_HOTKEY_STORAGE_KEY)
+    .then((stored) => {
+      const value = stored[FALLBACK_HOTKEY_STORAGE_KEY];
+      fallbackHotkey = normalizeHotkey(typeof value === "string" ? value : DEFAULT_FALLBACK_HOTKEY);
+    })
+    .catch(() => undefined);
+};
+
+const installFallbackHotkey = () => {
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (!isRuntimeAvailable() || event.defaultPrevented || isEditableTarget(event.target)) return;
+      if (!eventMatchesHotkey(event, fallbackHotkey)) return;
+      event.preventDefault();
+      openCommandBar();
+    },
+    true
+  );
+
+  if (isRuntimeAvailable() && chrome.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "local") return;
+      const next = changes[FALLBACK_HOTKEY_STORAGE_KEY]?.newValue;
+      if (typeof next === "string") fallbackHotkey = normalizeHotkey(next);
+    });
+  }
+};
+
 initSentry();
 
 const captureException = (error: unknown) => {
@@ -575,6 +646,8 @@ const getElementHtml = (message: GetElementHtmlMessage): RuntimeResult<PageConte
 };
 
 installIsolatedWorldHooks();
+loadFallbackHotkey();
+installFallbackHotkey();
 
 if (isRuntimeAvailable()) {
   chrome.runtime.onMessage.addListener((message: RuntimeRequest, _sender, sendResponse) => {

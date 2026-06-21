@@ -12,6 +12,10 @@ export function DesignStage() {
       <header className="ds-canvas__bar">
         <span>CONJURE</span>
         <span className="ds-canvas__bar-title">design mode</span>
+        <span className="ds-canvas__controls" aria-hidden="true">
+          <span>□</span>
+          <span>■</span>
+        </span>
       </header>
 
       <div className="ds-canvas__body">

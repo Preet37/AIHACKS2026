@@ -78,6 +78,14 @@
   min-width: 0;
 }
 
+.sp-kv-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cj-text);
+  font-size: var(--cj-fs-body);
+}
+
 .sp-input {
   width: 100%;
   padding: 4px 6px;
@@ -103,6 +111,13 @@
   flex-direction: column;
   gap: var(--cj-row-gap);
   padding-top: 4px;
+}
+
+.sp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: var(--cj-row-gap);
 }
 
 .sp-tab-chip {

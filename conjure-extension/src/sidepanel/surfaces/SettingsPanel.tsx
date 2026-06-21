@@ -2,6 +2,7 @@
 // MODE) of Toggle + StatusBlock rows + a square segmented control.
 // Refactored to §6 primitives (Pane, Toggle, StatusBlock, Button).
 import { RefreshCcw } from "lucide-react";
+import { normalizeHotkey } from "../../shared/keybind";
 import { Pane, Toggle, StatusBlock, Button } from "../components";
 import { useSurface } from "../surfaceContext";
 import "./Settings.css";
@@ -15,7 +16,13 @@ export function SettingsPanel() {
     setProjectId,
     connectionState,
     refreshTabs,
-    activeTabs
+    activeTabs,
+    commandShortcuts,
+    fallbackHotkey,
+    setFallbackHotkey,
+    refreshCommandShortcuts,
+    openShortcutSettings,
+    testCommandOverlay
   } = useSurface();
 
   const connectors = [
@@ -29,6 +36,9 @@ export function SettingsPanel() {
     { key: "requireConfirmation" as const, label: "Require confirmation before each run" },
     { key: "voiceAlwaysListening" as const, label: "Voice always-listening" }
   ];
+  const commandShortcut = commandShortcuts.find((command) => command.name === "toggle-command-bar");
+  const commandState = commandShortcut?.shortcut ? "active" : commandShortcut ? "pending" : "pending";
+  const commandLabel = commandShortcut?.shortcut || "unassigned";
 
   return (
     <div className="sp-stack" aria-label="Settings">
@@ -158,6 +168,47 @@ export function SettingsPanel() {
             >
               coding
             </button>
+          </div>
+        </div>
+      </Pane>
+
+      <Pane
+        name="KEYBIND"
+        surface
+        ariaLabel="Command keybind"
+        headerRight={
+          <Button variant="ghost" title="Refresh shortcut status" onClick={refreshCommandShortcuts}>
+            <RefreshCcw aria-hidden="true" />
+          </Button>
+        }
+      >
+        <div className="sp-pane-body">
+          <div className="sp-kv-row">
+            <span className="sp-kv-key">COMMAND</span>
+            <span className="sp-kv-val sp-kv-status">
+              <StatusBlock state={commandState} label={`Chrome shortcut ${commandLabel}`} />
+              <span>{commandLabel}</span>
+            </span>
+          </div>
+          <div className="sp-kv-row">
+            <span className="sp-kv-key">FALLBACK</span>
+            <span className="sp-kv-val">
+              <input
+                className="sp-input"
+                value={fallbackHotkey}
+                onChange={(event) => setFallbackHotkey(event.target.value)}
+                onBlur={(event) => setFallbackHotkey(normalizeHotkey(event.target.value))}
+                aria-label="Fallback command hotkey"
+              />
+            </span>
+          </div>
+          <div className="sp-actions">
+            <Button type="button" onClick={openShortcutSettings}>
+              [ open chrome shortcuts ↗ ]
+            </Button>
+            <Button type="button" variant="primary" onClick={testCommandOverlay}>
+              [ test overlay ]
+            </Button>
           </div>
         </div>
       </Pane>

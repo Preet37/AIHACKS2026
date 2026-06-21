@@ -1,5 +1,6 @@
 import type { Dispatch, FormEvent, RefObject, SetStateAction } from "react";
 import type { ActiveTabSnapshot, ModRecord } from "../../shared/messages";
+import { DEFAULT_FALLBACK_HOTKEY } from "../../shared/keybind";
 import type {
   ChatMessage,
   EditingMod,
@@ -116,6 +117,12 @@ export const createStaticSurfaceValue = ({
     },
     setUiSettings,
     rules: [],
+    commandShortcuts: [],
+    fallbackHotkey: DEFAULT_FALLBACK_HOTKEY,
+    setFallbackHotkey: noop,
+    refreshCommandShortcuts: noop,
+    openShortcutSettings: noop,
+    testCommandOverlay: noop,
     input: "",
     setInput: noop,
     handleSubmit: noop as (event: FormEvent) => void,

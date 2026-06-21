@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { loadExtensionFonts } from "../../shared/fonts";
 import { StatusBar, StatusBlock } from "../../sidepanel/components";
 import { SurfaceProvider } from "../../sidepanel/surfaceContext";
 import { TracePanel } from "../../sidepanel/surfaces/TracePanel";
@@ -10,6 +11,8 @@ import "../../sidepanel/styles.css";
 import "../../sidepanel/components/primitives.css";
 import "../../sidepanel/surfaces/Trace.css";
 import "../shared/page.css";
+
+loadExtensionFonts();
 
 function RunPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);

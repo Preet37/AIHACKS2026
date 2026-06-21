@@ -15,7 +15,9 @@ export function HomePanel() {
     agentRun,
     agentStatusClass,
     setMode,
-    pullRequestLinks
+    pullRequestLinks,
+    activeMods,
+    traceEntries
   } = useSurface();
 
   const runState = agentRun.active
@@ -32,17 +34,23 @@ export function HomePanel() {
         ariaLabel="Mods"
         bodyClassName="hp-mods-body"
         headerRight={
-          <Button
-            variant="ghost"
-            title="Refresh and re-apply mods"
-            onClick={() => void refreshAndApplyMods(projectId)}
-          >
-            <RefreshCcw aria-hidden="true" />
-          </Button>
+          <span className="hp-pane-count">
+            {mods.length} / {activeMods.length} active
+            <Button
+              variant="ghost"
+              title="Refresh and re-apply mods"
+              onClick={() => void refreshAndApplyMods(projectId)}
+            >
+              <RefreshCcw aria-hidden="true" />
+            </Button>
+          </span>
         }
       >
         {mods.length === 0 ? (
-          <p className="hp-empty">No mods yet. Press cmd K to build one.</p>
+          <div className="hp-empty">
+            <span className="hp-empty__mark">workspace</span>
+            <span>No mods yet. Press cmd K to build one.</span>
+          </div>
         ) : (
           <ul className="hp-mod-list">
             {mods.map((mod) => {
@@ -125,9 +133,12 @@ export function HomePanel() {
           />
         }
         barRight={
-          <Button variant="ghost" title="Open trace" onClick={() => setMode("trace")}>
-            track
-          </Button>
+          <span className="hp-pane-count">
+            {agentRun.active ? "1 active" : "0 active"}
+            <Button variant="ghost" title="Open trace" onClick={() => setMode("trace")}>
+              track
+            </Button>
+          </span>
         }
       >
         <div className="hp-run-body">
@@ -155,6 +166,22 @@ export function HomePanel() {
               ))}
             </ol>
           ) : null}
+
+          <ol className="hp-step-log" aria-label="Run steps">
+            {(traceEntries.length ? traceEntries : [
+              { id: "idle-1", label: "waiting for prompt", status: "pending" as const },
+              { id: "idle-2", label: "agent idle", status: "pending" as const }
+            ]).slice(0, 4).map((entry, index) => (
+              <li key={entry.id} className="hp-step">
+                <StatusBlock
+                  state={entry.status === "running" ? "active" : entry.status === "done" ? "done" : "pending"}
+                  pulse={entry.status === "running"}
+                />
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <span>{entry.label}</span>
+              </li>
+            ))}
+          </ol>
         </div>
       </Window>
     </div>

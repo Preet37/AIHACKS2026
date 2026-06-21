@@ -38,7 +38,7 @@
   background: transparent;
 }
 .cj-status--pulse {
-  animation: cj-pulse 1.2s ease-in-out infinite;
+  animation: cj-pulse 1.2s var(--cj-ease) infinite;
 }
 @keyframes cj-pulse {
   0%,
@@ -274,6 +274,7 @@
   height: 9px;
   margin: 1px;
   background: var(--cj-faint);
+  transition: transform var(--cj-dur-fast) var(--cj-ease), background var(--cj-dur-fast) var(--cj-ease);
 }
 .cj-toggle--on {
   justify-content: flex-end;
@@ -375,6 +376,7 @@
   border-color: var(--cj-accent);
   background: var(--cj-accent-wash);
   color: var(--cj-text);
+  animation: cj-selected-settle var(--cj-dur-med) var(--cj-ease);
 }
 .cj-option__text {
   display: grid;
@@ -497,6 +499,7 @@
   width: 7px;
   height: 7px;
   background: var(--cj-accent);
+  animation: cj-handle-pulse 1.6s var(--cj-ease) infinite;
 }
 .cj-selection__handle--tl {
   top: -4px;
@@ -529,9 +532,37 @@
   box-shadow: 0 0 0 1px var(--cj-accent);
 }
 
+@keyframes cj-selected-settle {
+  from {
+    opacity: 0.72;
+    transform: translateY(1px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes cj-handle-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.58;
+  }
+}
+
 /* ── Reduced motion (§8) — the static aesthetic must stay fully readable ── */
 @media (prefers-reduced-motion: reduce) {
   .cj-status--pulse {
     animation: none;
+  }
+  .cj-option--selected,
+  .cj-selection__handle {
+    animation: none;
+  }
+  .cj-toggle__knob {
+    transition: none;
   }
 }

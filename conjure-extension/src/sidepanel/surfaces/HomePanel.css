@@ -22,6 +22,16 @@
   padding: 0;
 }
 
+.hp-pane-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 /* MODS pane: each mod row */
 .hp-mod-row {
   display: grid;
@@ -115,10 +125,20 @@
 
 /* Empty state — needs own padding since hp-mods-body removes pane body padding */
 .hp-empty {
+  display: grid;
+  min-height: 118px;
+  place-content: center;
+  gap: 5px;
   padding: var(--cj-pane-pad);
-  margin: 0;
   color: var(--cj-dim);
-  font-size: var(--cj-fs-body);
+  font-size: var(--cj-fs-micro);
+  text-align: center;
+}
+.hp-empty__mark {
+  color: var(--cj-faint);
+  font-size: var(--cj-fs-micro);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
 }
 
 /* RUNS window body */
@@ -165,46 +185,31 @@
   gap: 4px;
 }
 
+.hp-step-log {
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hp-step {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+}
+
+.hp-step span:nth-child(2) {
+  color: var(--cj-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 /* RUNS window bar right control */
 .hp-runs-bar-right {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-
-/* Conversation pane */
-.hp-chat-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--cj-row-gap);
-  max-height: 200px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--cj-line) transparent;
-}
-.hp-msg {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.hp-msg-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.hp-msg-role {
-  color: var(--cj-faint);
-  font-size: var(--cj-fs-micro);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-.hp-msg-time {
-  color: var(--cj-faint);
-  font-size: var(--cj-fs-micro);
-}
-.hp-msg-content {
-  margin: 0;
-  color: var(--cj-text);
-  font-size: var(--cj-fs-body);
-  line-height: 1.45;
 }

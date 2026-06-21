@@ -14,6 +14,8 @@ export const BACKGROUND_MESSAGE = {
   OPEN_DESIGN_TAB: "conjure:open_design_tab",
   OPEN_TRACE_TAB: "conjure:open_trace_tab",
   OPEN_SETTINGS_TAB: "conjure:open_settings_tab",
+  GET_COMMAND_SHORTCUTS: "conjure:get_command_shortcuts",
+  OPEN_SHORTCUT_SETTINGS: "conjure:open_shortcut_settings",
   TOGGLE_COMMAND_BAR: "conjure:toggle_command_bar"
 } as const;
 
@@ -114,6 +116,12 @@ export interface ToggleCommandBarContentMessage {
   type: typeof CONTENT_MESSAGE.TOGGLE_COMMAND_BAR;
 }
 
+export interface CommandShortcutInfo {
+  name: string;
+  description?: string;
+  shortcut?: string;
+}
+
 export interface GetActiveTabsMessage {
   type: typeof BACKGROUND_MESSAGE.GET_ACTIVE_TABS;
 }
@@ -180,6 +188,14 @@ export interface OpenSettingsTabMessage {
   type: typeof BACKGROUND_MESSAGE.OPEN_SETTINGS_TAB;
 }
 
+export interface GetCommandShortcutsMessage {
+  type: typeof BACKGROUND_MESSAGE.GET_COMMAND_SHORTCUTS;
+}
+
+export interface OpenShortcutSettingsMessage {
+  type: typeof BACKGROUND_MESSAGE.OPEN_SHORTCUT_SETTINGS;
+}
+
 export interface ToggleCommandBarBackgroundMessage {
   type: typeof BACKGROUND_MESSAGE.TOGGLE_COMMAND_BAR;
 }
@@ -203,6 +219,8 @@ export type RuntimeRequest =
   | OpenDesignTabMessage
   | OpenTraceTabMessage
   | OpenSettingsTabMessage
+  | GetCommandShortcutsMessage
+  | OpenShortcutSettingsMessage
   | ToggleCommandBarBackgroundMessage;
 
 export interface ChatClientEvent {

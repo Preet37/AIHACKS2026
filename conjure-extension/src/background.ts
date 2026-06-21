@@ -6,6 +6,7 @@ import {
   type ActiveTabSnapshot,
   type ApplyModsMessage,
   type ApplyModsResult,
+  type CommandShortcutInfo,
   type ConsoleLogEntry,
   type ConsoleLevel,
   type ContentConsoleEventMessage,
@@ -292,6 +293,30 @@ const openSettingsTab = async (): Promise<RuntimeResult<{ opened: boolean }>> =>
   return { ok: true, data: { opened: true } };
 };
 
+const getCommandShortcuts = async (): Promise<RuntimeResult<CommandShortcutInfo[]>> => {
+  if (!isRuntimeAvailable() || !chrome.commands?.getAll) {
+    return { ok: false, error: "Command shortcuts are unavailable." };
+  }
+  const commands = await chrome.commands.getAll();
+  return {
+    ok: true,
+    data: commands
+      .filter((command): command is chrome.commands.Command & { name: string } => typeof command.name === "string")
+      .map(({ name, description, shortcut }) => ({ name, description, shortcut }))
+  };
+};
+
+const openShortcutSettings = async (): Promise<RuntimeResult<{ opened: boolean; url: string }>> => {
+  const url = "chrome://extensions/shortcuts";
+  if (!isRuntimeAvailable()) return { ok: false, error: "Extension runtime is unavailable." };
+  try {
+    await chrome.tabs.create({ url });
+    return { ok: true, data: { opened: true, url } };
+  } catch {
+    return { ok: false, error: `Open ${url} manually.` };
+  }
+};
+
 const getActiveTab = async (): Promise<chrome.tabs.Tab | undefined> => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return typeof tab?.id === "number" ? tab : undefined;
@@ -357,6 +382,10 @@ const handleRuntimeMessage = async (
       return openExtensionTab("run.html");
     case BACKGROUND_MESSAGE.OPEN_SETTINGS_TAB:
       return openSettingsTab();
+    case BACKGROUND_MESSAGE.GET_COMMAND_SHORTCUTS:
+      return getCommandShortcuts();
+    case BACKGROUND_MESSAGE.OPEN_SHORTCUT_SETTINGS:
+      return openShortcutSettings();
     case BACKGROUND_MESSAGE.TOGGLE_COMMAND_BAR:
       return toggleCommandBar();
     case BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE:

@@ -76,4 +76,9 @@
   --cj-pane-pad: 12px;
   --cj-row-gap:  6px;
   --cj-bar-h:    34px; /* status bar + command bar height */
+
+  /* motion */
+  --cj-dur-fast: 120ms;
+  --cj-dur-med:  180ms;
+  --cj-ease:     cubic-bezier(0.2, 0, 0, 1);
 }

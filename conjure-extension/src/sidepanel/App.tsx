@@ -8,6 +8,10 @@ import {
   CONJURE_CONFIG
 } from "../shared/config";
 import {
+  DEFAULT_FALLBACK_HOTKEY,
+  FALLBACK_HOTKEY_STORAGE_KEY
+} from "../shared/keybind";
+import {
   BACKGROUND_MESSAGE,
   CLIENT_EVENT,
   CONTENT_MESSAGE,
@@ -15,6 +19,7 @@ import {
   type ActiveTabSnapshot,
   type ApplyModsResult,
   type ClientToServerEvent,
+  type CommandShortcutInfo,
   type ConsoleLevel,
   type ConsoleLogEntry,
   type GeneratedBundle,
@@ -279,6 +284,8 @@ export default function App() {
     voiceAlwaysListening: false,
     workMode: "planning"
   });
+  const [commandShortcuts, setCommandShortcuts] = useState<CommandShortcutInfo[]>([]);
+  const [fallbackHotkey, setFallbackHotkeyState] = useState(DEFAULT_FALLBACK_HOTKEY);
 
   const socketRef = useRef<WebSocket | null>(null);
   const pendingOpenRef = useRef<Promise<WebSocket> | null>(null);
@@ -312,6 +319,29 @@ export default function App() {
 
   const requestCommandBar = useCallback(async () => {
     await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.TOGGLE_COMMAND_BAR });
+  }, []);
+
+  const refreshCommandShortcuts = useCallback(async () => {
+    const response = await safeRuntimeMessage<CommandShortcutInfo[]>({
+      type: BACKGROUND_MESSAGE.GET_COMMAND_SHORTCUTS
+    });
+    if (isRuntimeOk(response)) setCommandShortcuts(response.data);
+  }, []);
+
+  const openShortcutSettings = useCallback(async () => {
+    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.OPEN_SHORTCUT_SETTINGS });
+  }, []);
+
+  const testCommandOverlay = useCallback(() => {
+    void requestCommandBar();
+  }, [requestCommandBar]);
+
+  const setFallbackHotkey = useCallback((value: string) => {
+    setFallbackHotkeyState(value);
+    const chromeApi = getChromeApi();
+    if (chromeApi?.storage?.local) {
+      chromeApi.storage.local.set({ [FALLBACK_HOTKEY_STORAGE_KEY]: value }).catch(captureException);
+    }
   }, []);
 
   const setRoutedMode = useCallback(
@@ -937,6 +967,14 @@ export default function App() {
     const query = input.trim();
     if (!query) return;
     setInput("");
+    if (uiSettings.workMode === "planning") {
+      setMode("planning");
+      setMessages((current) => [
+        ...current,
+        { id: makeId(), role: "user", content: query, createdAt: Date.now() }
+      ]);
+      return;
+    }
     await submitChat(query);
   };
 
@@ -944,6 +982,14 @@ export default function App() {
     const command = query.trim();
     if (!command) return;
     setInput("");
+    if (uiSettings.workMode === "planning") {
+      setMode("planning");
+      setMessages((current) => [
+        ...current,
+        { id: makeId(), role: "user", content: command, createdAt: Date.now() }
+      ]);
+      return;
+    }
     await submitChat(command);
   };
 
@@ -1039,6 +1085,22 @@ export default function App() {
     void getActiveTabs();
     void safeRuntimeMessage({ type: BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE });
   }, [getActiveTabs]);
+
+  useEffect(() => {
+    const chromeApi = getChromeApi();
+    if (!chromeApi?.storage?.local) return;
+    chromeApi.storage.local
+      .get(FALLBACK_HOTKEY_STORAGE_KEY)
+      .then((stored) => {
+        const value = stored[FALLBACK_HOTKEY_STORAGE_KEY];
+        setFallbackHotkeyState(typeof value === "string" ? value : DEFAULT_FALLBACK_HOTKEY);
+      })
+      .catch(captureException);
+  }, []);
+
+  useEffect(() => {
+    void refreshCommandShortcuts();
+  }, [refreshCommandShortcuts]);
 
   // Load the mod list and (re)apply every active mod whenever the project changes.
   useEffect(() => {
@@ -1179,6 +1241,12 @@ export default function App() {
     toggleUiSetting,
     setUiSettings,
     rules,
+    commandShortcuts,
+    fallbackHotkey,
+    setFallbackHotkey,
+    refreshCommandShortcuts,
+    openShortcutSettings,
+    testCommandOverlay,
     input,
     setInput,
     handleSubmit,

@@ -3,7 +3,7 @@
 // slice it needs via useSurface(). This lets surfaces live in separate files
 // (composing §6 primitives) without 100-line prop drilling.
 import { createContext, useContext, type Dispatch, type FormEvent, type RefObject, type SetStateAction } from "react";
-import type { ActiveTabSnapshot, AgentProvider, AgentPullRequest, ModRecord } from "../shared/messages";
+import type { ActiveTabSnapshot, AgentProvider, AgentPullRequest, CommandShortcutInfo, ModRecord } from "../shared/messages";
 
 export type PanelMode = "home" | "planning" | "design" | "trace" | "settings";
 export type WorkMode = "planning" | "coding";
@@ -119,6 +119,12 @@ export interface SurfaceContextValue {
   toggleUiSetting: (key: keyof UiSettings) => void;
   setUiSettings: Dispatch<SetStateAction<UiSettings>>;
   rules: string[];
+  commandShortcuts: CommandShortcutInfo[];
+  fallbackHotkey: string;
+  setFallbackHotkey: (value: string) => void;
+  refreshCommandShortcuts: () => void;
+  openShortcutSettings: () => void;
+  testCommandOverlay: () => void;
 
   // command bar / palette
   input: string;

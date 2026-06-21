@@ -50,6 +50,12 @@
   letter-spacing: 0.06em;
 }
 
+.ts-stage__state .cj-btn {
+  min-height: 18px;
+  padding: 0 5px;
+  font-size: var(--cj-fs-micro);
+}
+
 .ts-stage__state--active {
   color: var(--cj-accent);
 }
@@ -85,6 +91,7 @@
 
 .ts-stage__step--active {
   color: var(--cj-text);
+  animation: ts-active-step 1.4s var(--cj-ease) infinite;
 }
 
 .ts-stage__step--failed {
@@ -164,4 +171,22 @@
   font-size: var(--cj-fs-micro);
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+
+@keyframes ts-active-step {
+  0%,
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  50% {
+    opacity: 0.72;
+    transform: translateX(1px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ts-stage__step--active {
+    animation: none;
+  }
 }
