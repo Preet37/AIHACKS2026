@@ -45,3 +45,5 @@ export const createModsBundleUrl = (projectId: string) => `${projectBase(project
 
 export const createModUrl = (projectId: string, modId: string) =>
   `${projectBase(projectId)}/mods/${encodeURIComponent(modId)}`;
+
+export const createAgentTaskUrl = (projectId: string) => `${projectBase(projectId)}/agent-task`;

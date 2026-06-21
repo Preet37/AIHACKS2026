@@ -175,6 +175,23 @@ export interface ApplyModsResult {
   reloaded: number;
 }
 
+/** One item a Fetch.ai agent task found on the current page. */
+export interface AgentFinding {
+  title: string;
+  url: string;
+  image?: string;
+  price?: string;
+  note?: string;
+}
+
+/** Response body from POST /projects/{id}/agent-task. */
+export interface AgentTaskResponse {
+  project_id: string;
+  task: string;
+  url: string;
+  findings: AgentFinding[];
+}
+
 export type RuntimeRequest =
   | ContentConsoleEventMessage
   | GetPageContentMessage
