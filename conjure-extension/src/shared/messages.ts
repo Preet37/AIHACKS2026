@@ -3,15 +3,23 @@ export const CONTENT_MESSAGE = {
   SYNC_MODS: "conjure:sync_mods",
   AGENT_ACTION: "conjure:agent_action",
   GET_PAGE_CONTENT: "conjure:get_page_content",
-  GET_ELEMENT_HTML: "conjure:get_element_html"
+  GET_ELEMENT_HTML: "conjure:get_element_html",
+  TOGGLE_COMMAND_BAR: "conjure:toggle_command_bar"
 } as const;
 
 export const BACKGROUND_MESSAGE = {
   GET_CURRENT_TAB: "conjure:get_current_tab",
+  GET_ACTIVE_TABS: "conjure:get_active_tabs",
   GET_CONSOLE_LOGS: "conjure:get_console_logs",
   RELOAD_CURRENT_TAB_ONCE: "conjure:reload_current_tab_once",
   APPLY_MODS: "conjure:apply_mods",
-  REMOVE_MOD: "conjure:remove_mod"
+  REMOVE_MOD: "conjure:remove_mod",
+  OPEN_DESIGN_TAB: "conjure:open_design_tab",
+  OPEN_TRACE_TAB: "conjure:open_trace_tab",
+  OPEN_SETTINGS_TAB: "conjure:open_settings_tab",
+  GET_COMMAND_SHORTCUTS: "conjure:get_command_shortcuts",
+  OPEN_SHORTCUT_SETTINGS: "conjure:open_shortcut_settings",
+  TOGGLE_COMMAND_BAR: "conjure:toggle_command_bar"
 } as const;
 
 export const CLIENT_EVENT = {
@@ -121,6 +129,20 @@ export interface GetCurrentTabMessage {
   type: typeof BACKGROUND_MESSAGE.GET_CURRENT_TAB;
 }
 
+export interface ToggleCommandBarContentMessage {
+  type: typeof CONTENT_MESSAGE.TOGGLE_COMMAND_BAR;
+}
+
+export interface CommandShortcutInfo {
+  name: string;
+  description?: string;
+  shortcut?: string;
+}
+
+export interface GetActiveTabsMessage {
+  type: typeof BACKGROUND_MESSAGE.GET_ACTIVE_TABS;
+}
+
 export interface GetConsoleLogsMessage {
   type: typeof BACKGROUND_MESSAGE.GET_CONSOLE_LOGS;
   tabId?: number;
@@ -182,6 +204,30 @@ export interface RemoveModMessage {
   modId: string;
 }
 
+export interface OpenDesignTabMessage {
+  type: typeof BACKGROUND_MESSAGE.OPEN_DESIGN_TAB;
+}
+
+export interface OpenTraceTabMessage {
+  type: typeof BACKGROUND_MESSAGE.OPEN_TRACE_TAB;
+}
+
+export interface OpenSettingsTabMessage {
+  type: typeof BACKGROUND_MESSAGE.OPEN_SETTINGS_TAB;
+}
+
+export interface GetCommandShortcutsMessage {
+  type: typeof BACKGROUND_MESSAGE.GET_COMMAND_SHORTCUTS;
+}
+
+export interface OpenShortcutSettingsMessage {
+  type: typeof BACKGROUND_MESSAGE.OPEN_SHORTCUT_SETTINGS;
+}
+
+export interface ToggleCommandBarBackgroundMessage {
+  type: typeof BACKGROUND_MESSAGE.TOGGLE_COMMAND_BAR;
+}
+
 export interface ApplyModsResult {
   applied: number;
   removed: number;
@@ -214,10 +260,18 @@ export type RuntimeRequest =
   | GetPageContentMessage
   | GetElementHtmlMessage
   | GetCurrentTabMessage
+  | ToggleCommandBarContentMessage
+  | GetActiveTabsMessage
   | GetConsoleLogsMessage
   | ReloadCurrentTabOnceMessage
   | ApplyModsMessage
-  | RemoveModMessage;
+  | RemoveModMessage
+  | OpenDesignTabMessage
+  | OpenTraceTabMessage
+  | OpenSettingsTabMessage
+  | GetCommandShortcutsMessage
+  | OpenShortcutSettingsMessage
+  | ToggleCommandBarBackgroundMessage;
 
 export interface ChatClientEvent {
   type: typeof CLIENT_EVENT.CHAT;

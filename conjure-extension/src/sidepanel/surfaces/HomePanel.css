@@ -1,0 +1,215 @@
+/*
+ * HomePanel surface-specific layout. All values derive from §2 tokens.
+ * No hex literals, no border-radius, no shadows/gradients/glows.
+ */
+
+/* Stacked panes fill the panel edge-to-edge */
+.hp-stack {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+}
+
+/* Override pane body padding for the mods list so each row controls its own */
+.hp-mods-body {
+  padding: 0;
+}
+
+.hp-mod-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.hp-pane-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* MODS pane: each mod row */
+.hp-mod-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--cj-row-gap) 10px;
+  align-items: start;
+  padding: var(--cj-pane-pad);
+  border-bottom: 1px solid var(--cj-line);
+}
+.hp-mod-row:last-child {
+  border-bottom: none;
+}
+.hp-mod-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  grid-column: 1 / -1;
+}
+.hp-mod-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cj-text);
+  font-size: var(--cj-fs-body);
+  font-weight: var(--cj-w-medium);
+}
+.hp-mod-verdict {
+  flex: 0 0 auto;
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.hp-mod-prompt {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+  line-height: 1.45;
+}
+.hp-mod-link {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+  text-decoration: none;
+}
+.hp-mod-link:hover {
+  color: var(--cj-text);
+}
+.hp-mod-link svg {
+  width: 11px;
+  height: 11px;
+}
+.hp-mod-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.hp-mod-edit {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hp-mod-edit textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--cj-line);
+  background: var(--cj-surface);
+  color: var(--cj-text);
+  font: inherit;
+  font-size: var(--cj-fs-body);
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+.hp-mod-edit textarea:focus {
+  box-shadow: 0 0 0 1px var(--cj-accent);
+}
+.hp-mod-edit-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Empty state — needs own padding since hp-mods-body removes pane body padding */
+.hp-empty {
+  display: grid;
+  min-height: 118px;
+  place-content: center;
+  gap: 5px;
+  padding: var(--cj-pane-pad);
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+  text-align: center;
+}
+.hp-empty__mark {
+  color: var(--cj-faint);
+  font-size: var(--cj-fs-micro);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* RUNS window body */
+.hp-run-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cj-row-gap);
+  padding: var(--cj-pane-pad);
+}
+.hp-run-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hp-run-phrase {
+  color: var(--cj-text);
+  font-size: var(--cj-fs-body);
+}
+.hp-run-dim {
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-body);
+}
+.hp-run-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+  text-decoration: none;
+}
+.hp-run-link:hover {
+  color: var(--cj-text);
+}
+.hp-run-link svg {
+  width: 11px;
+  height: 11px;
+}
+.hp-pr-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hp-step-log {
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hp-step {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+}
+
+.hp-step span:nth-child(2) {
+  color: var(--cj-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* RUNS window bar right control */
+.hp-runs-bar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

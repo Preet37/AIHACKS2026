@@ -1,0 +1,56 @@
+﻿{
+    "projectTitle":  "Conjure Command Interface",
+    "projectId":  "17399145846593091740",
+    "designSystemId":  "asset-stub-assets_8850df87eceb448a8b46bf192483af7a",
+    "note":  "Design System ID is an asset stub, not retrievable via the available Stitch get_screen tool.",
+    "screens":  [
+                    {
+                        "title":  "Conjure Command Bar Overlay",
+                        "screenshot":  "https://lh3.googleusercontent.com/aida/AP1WRLue3J23E26_z6myKwFYPNDg2ehu1gXQnOtoCeqV7J410iRO_Oi2AKefIZoKqd5QBkyYZBVxjmgKCZC43SYJfCpAG5Vt7sfW4srEuQiHSp-Vv1cYh_4aLuABsDetlM-EAUedyxQ_PS7Bgv2Eb2KgGnn0h_-8u6GbYvvXCUSupXyxdtatb-EDp4Ug0EbNeegcJ2o1fXMR8cggTOHBcNu3Ebo7A8j-zoNaZIGZQDgxsIELFhXhCw1Ah90EgJw",
+                        "html":  "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzJiNWYzYzI1ZTQ5ODRlNDI5OGY1NjE0MjZhYTVhMDI3EgsSBxDW647x3xgYAZIBJAoKcHJvamVjdF9pZBIWQhQxNzM5OTE0NTg0NjU5MzA5MTc0MA\u0026filename=\u0026opi=89354086",
+                        "id":  "075663da7bc94996827e8c14d66528a5"
+                    },
+                    {
+                        "title":  "conjure_design_language_indigo.html",
+                        "screenshot":  "",
+                        "html":  "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBKOARIhYXBwX2NvbXBhbmlvbl91c2VyX3VwbG9hZGVkX2ZpbGVzGmkKM3VzZXJfdXBsb2FkZWRfaHRtbF8wMDA2NTRjMDA0OWU3MWYxMDFhNjBiZGE1YzM3ZGM2ORILEgcQ1uuO8d8YGAGSASQKCnByb2plY3RfaWQSFkIUMTczOTkxNDU4NDY1OTMwOTE3NDA\u0026filename=\u0026opi=89354086",
+                        "id":  "9675494491615539350"
+                    },
+                    {
+                        "title":  "Conjure Design Mode Inspector",
+                        "screenshot":  "https://lh3.googleusercontent.com/aida/AP1WRLvYUXnp4BHPLERFMz6snWH6G4elXG5Z-1QUouqObaGmDVJJhZ-J27TJ1Eqdckg9OY15GDYApU6P2a6SpdDL7LlR7xs1zriviMiFql4ypJPODUdmR5CnZEdYMa5yujPsirE0JInSION6sY4uux3oN6KDcnIMiwcHh3-jitgHJ_ErYrraURb6LL0L8OCAlWEF7XoR4ikbWLCeNLHKwsBU8kOXVpe8mEeuMOjiKopaWnB2QoqX0_o-qLxDUmQ",
+                        "html":  "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzczODM4OTAxNDhkMjQ4Mzk4MWE2Zjg3YTRjNTYyOGYwEgsSBxDW647x3xgYAZIBJAoKcHJvamVjdF9pZBIWQhQxNzM5OTE0NTg0NjU5MzA5MTc0MA\u0026filename=\u0026opi=89354086",
+                        "id":  "2fa38df8c0dd46228f538ec0e5ab56be"
+                    },
+                    {
+                        "title":  "Conjure Planning Mode",
+                        "screenshot":  "https://lh3.googleusercontent.com/aida/AP1WRLvHx4-aV5pR0Efcp8yNW4nvws0sCd9U9jLX5CCkz2B0zXF6Zp6QFTVo5uaiqr5pNs2J1ICQSx4ScqCQ9rT4RDZ_P7EzOZopTw5ABKAJNOSJouB7ZISYXio1haY4i9hf870TCdpKvWTH2P2207eKElUH_FVXaS0j5FnBRWQNZAhpyrTAIOowo4BJeUYpFfNHHa223dB2ZofNOWqHqcbySV4PxjHNq9yIA1CaUSKN1sck0trGIDWNGatnJel1",
+                        "html":  "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzBiOTNkZmY3NTA2OTQxZjY4MGE0ZmJlOWZjNjFiMWI4EgsSBxDW647x3xgYAZIBJAoKcHJvamVjdF9pZBIWQhQxNzM5OTE0NTg0NjU5MzA5MTc0MA\u0026filename=\u0026opi=89354086",
+                        "id":  "3fd8d8cad9744a638824218ca4f37e7a"
+                    },
+                    {
+                        "title":  "Conjure Home Sidebar",
+                        "screenshot":  "https://lh3.googleusercontent.com/aida/AP1WRLvuiLRIxLUj0RUN5tA1F7LUmY3VZWOkYfMNnnFtplLi17K17pj9Ag6RgH58prgI2ZCxTaEyuWtRbnLlbQYIBkLAmXH5uDFqfjhSBAsOQDQtDDrbP4B8t94xImQjUwkOJ684DeWtJTdKAVAx19FrHaZY24Gjbegg7xPretQoeHU1z8cb7Kuz3OVcUbIgfsmJR9b1LE6opJR04Fsq5aTZGUvl30RoOgDoyYw9CMQscenEZBkbQjURMvF2ng1a",
+                        "html":  "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzAwMDY1NGMwMGJjZjdhNmMwMzM4NWQ3MjA2MTAzY2VhEgsSBxDW647x3xgYAZIBJAoKcHJvamVjdF9pZBIWQhQxNzM5OTE0NTg0NjU5MzA5MTc0MA\u0026filename=\u0026opi=89354086",
+                        "id":  "5a95bb4812894992baa2b597215f154e"
+                    },
+                    {
+                        "title":  "Conjure Idle Splash",
+                        "screenshot":  "https://lh3.googleusercontent.com/aida/AP1WRLs7KkctkIZ0KzPNSwKHH1JJDviGaRjeb1nEyzGEI53oqVKenrNmsgnkI8sDRTW4LDyiy5sl4CSMWsisuFTIDw8Wnk3wONT6yQjJMPGXKTT-bel8eTl8yob74-dqZqAEFyZ81agVscn_MS4FAejQaLdG6uQieju0yCFd-9N-MpXXHUParCuUzFv06CFZ3VtFO-l5rjQBdygLofOZFyiII6tBcLhjl6ZyudbQcMO8N2XiHofdvt9P2262stDL",
+                        "html":  "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzllNGUzZWEzZjk2YzRjZjFiZWY3MGU1M2Y4MjRjMTU0EgsSBxDW647x3xgYAZIBJAoKcHJvamVjdF9pZBIWQhQxNzM5OTE0NTg0NjU5MzA5MTc0MA\u0026filename=\u0026opi=89354086",
+                        "id":  "7d0bf8fb78574171a9880a11f3af1151"
+                    },
+                    {
+                        "title":  "Conjure Agent Run Trace",
+                        "screenshot":  "https://lh3.googleusercontent.com/aida/AP1WRLu16hA4znl_dLbLbxR0ibjVkXw3Vlj8hDBQkIDy9Pr6vpENdgIjdrB11mZ9DQ6iG049sxCWOTcungry0I0VCbgwPMXCuNnxKbngonGmk4OtVaEp1av713cHrl4eREb03whQO-G1wabx9XkPe41NccLorcUIgfV_PpGV9i1axm76sYm3lSkGXPD_nRa1v5VW4imk-gVNrsfvp7E9vTTlhfLiy5zcRvrN7M0NLFG7d8L0DOKp7UIKl_Sw4DSS",
+                        "html":  "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzU4ZDU4ZWJjMjQyMjRkYWZhZTdlNGUwZTBhMWRmOWFlEgsSBxDW647x3xgYAZIBJAoKcHJvamVjdF9pZBIWQhQxNzM5OTE0NTg0NjU5MzA5MTc0MA\u0026filename=\u0026opi=89354086",
+                        "id":  "d2847bd8ca1f44f5a01928a95897385d"
+                    },
+                    {
+                        "title":  "Conjure Settings",
+                        "screenshot":  "https://lh3.googleusercontent.com/aida/AP1WRLuLoKFpF7Z5NIodhKkJtUPXxlYh8XNkDDTIZ88aqVd80PiK5i8e9E54a3YigfN2CSKvULzvyQhwWyolPBD3kKR3Mn2-3T7I_LQm9vDUSNh6P6s9Sa-Td6oJy-sRKAGgy-lD7koak8dWUDBnq1ElDfCH33Ra2WSiVQhZIzNQMuhbRdK1C7fA6YaKz5mzh7OTmTC_4FiXyTZW2XZvyxB8ZYIZ52ATDtjUBU-tsei0U9q2EJBgwFVdnZ8R16Q",
+                        "html":  "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sX2M5MTliNjZhYzMwMTQ4YzFhNDAyZGQzOTViOWUxZjY1EgsSBxDW647x3xgYAZIBJAoKcHJvamVjdF9pZBIWQhQxNzM5OTE0NTg0NjU5MzA5MTc0MA\u0026filename=\u0026opi=89354086",
+                        "id":  "f81a6456301a4512835d5d903474568b"
+                    }
+                ]
+}

@@ -1,0 +1,158 @@
+/* Finder results surface. Token-driven per CONJURE-DESIGN.md: square corners,
+   hairline separators, mono type. Composes inside a §6 Pane. */
+
+.fp-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cj-row-gap);
+}
+
+.fp-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--cj-font-mono);
+  font-size: var(--cj-fs-micro);
+  color: var(--cj-dim);
+}
+
+.fp-empty {
+  margin: 0;
+  padding: 8px 0;
+  font-family: var(--cj-font-mono);
+  font-size: var(--cj-fs-body);
+  color: var(--cj-dim);
+}
+
+.fp-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-family: var(--cj-font-mono);
+  font-size: var(--cj-fs-body);
+  color: var(--cj-text);
+  border-left: 2px solid var(--cj-accent);
+  padding: 8px 10px;
+  background: var(--cj-surface-2);
+}
+
+.fp-error svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--cj-accent-bright);
+}
+
+.fp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--cj-row-gap);
+}
+
+.fp-card {
+  border: 1px solid var(--cj-line);
+  background: var(--cj-surface);
+  transition: background var(--cj-dur-fast) var(--cj-ease),
+    border-color var(--cj-dur-fast) var(--cj-ease);
+}
+
+.fp-card:hover {
+  background: var(--cj-surface-2);
+  border-color: var(--cj-line-strong);
+}
+
+.fp-card-link {
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+  text-decoration: none;
+  color: inherit;
+  align-items: stretch;
+}
+
+.fp-thumb {
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--cj-ground);
+  border: 1px solid var(--cj-line);
+  overflow: hidden;
+}
+
+.fp-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fp-thumb svg {
+  width: 20px;
+  height: 20px;
+  color: var(--cj-faint);
+}
+
+.fp-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.fp-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--cj-font-mono);
+  font-size: var(--cj-fs-body);
+  font-weight: var(--cj-w-medium);
+  color: var(--cj-text);
+}
+
+.fp-title svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  color: var(--cj-dim);
+}
+
+.fp-price {
+  font-family: var(--cj-font-mono);
+  font-size: var(--cj-fs-body);
+  color: var(--cj-accent-bright);
+}
+
+.fp-note {
+  font-family: var(--cj-font-mono);
+  font-size: var(--cj-fs-micro);
+  color: var(--cj-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fp-replay {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-family: var(--cj-font-mono);
+  font-size: var(--cj-fs-micro);
+  color: var(--cj-accent-bright);
+  text-decoration: none;
+}
+
+.fp-replay:hover {
+  text-decoration: underline;
+}
+
+.fp-replay svg {
+  width: 14px;
+  height: 14px;
+}

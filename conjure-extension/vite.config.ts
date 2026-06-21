@@ -8,7 +8,15 @@ export default defineConfig({
   envDir: "..",
   build: {
     emptyOutDir: true,
-    sourcemap: true
+    sourcemap: true,
+    rollupOptions: {
+      input: {
+        index: "index.html",
+        design: "design.html",
+        run: "run.html",
+        settings: "settings.html"
+      }
+    }
   },
   server: {
     port: 5173,

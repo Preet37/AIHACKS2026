@@ -1,0 +1,84 @@
+/*
+ * Conjure design tokens — the contract (CONJURE-DESIGN.md §2).
+ * Single source of truth. Nothing else in the codebase hardcodes a hex,
+ * a radius, or a font stack. Fonts are bundled under public/fonts so MV3
+ * pages and content overlays can resolve them from the extension package.
+ */
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Silkscreen";
+  src: url("/fonts/Silkscreen-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* grounds */
+  --cj-ground:        #08080F; /* working surface — all dense chrome */
+  --cj-surface:       #101026; /* raised panes, inputs, windows */
+  --cj-surface-2:     #16163A; /* hover / nested surface */
+  --cj-loud:          #222290; /* royal indigo — legacy loud ground */
+  --cj-overlay-loud:  #222290; /* command overlay scrim/border */
+
+  /* text */
+  --cj-text:          #F0F0F5;
+  --cj-dim:           #8A8AA4;
+  --cj-faint:         #54546E;
+  --cj-on-loud:       #FFFFFF; /* text on --cj-loud */
+  --cj-on-loud-dim:   #B9B9E6;
+
+  /* accent — load-bearing, STATE ONLY */
+  --cj-accent:        #6C6AF5;
+  --cj-accent-bright: #ADABFF; /* accent shown on --cj-loud */
+  --cj-accent-wash:   rgba(108, 106, 245, 0.16); /* active toggle / highlighted row */
+
+  /* lines */
+  --cj-line:          rgba(240, 240, 245, 0.14);
+  --cj-line-strong:   rgba(240, 240, 245, 0.28);
+  --cj-line-loud:     rgba(255, 255, 255, 0.22); /* hairlines on --cj-loud */
+
+  /* shape */
+  --cj-radius: 0; /* always. there are no rounded corners in Conjure. */
+
+  /* type */
+  --cj-font-mono:  'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+  --cj-font-pixel: 'Silkscreen', 'JetBrains Mono', monospace; /* wordmark only */
+
+  /* type scale */
+  --cj-fs-micro: 11px; /* metadata keys, hints, footer */
+  --cj-fs-body:  13px; /* default UI text, rows, logs */
+  --cj-fs-label: 16px; /* pane / section emphasis */
+  --cj-fs-title: 22px; /* window + screen titles */
+  --cj-fs-hero:  44px; /* CONJURE wordmark (pixel) */
+
+  /* weights — only two */
+  --cj-w-regular: 400;
+  --cj-w-medium:  500;
+
+  /* spacing */
+  --cj-pane-pad: 12px;
+  --cj-row-gap:  6px;
+  --cj-bar-h:    34px; /* status bar + command bar height */
+
+  /* motion */
+  --cj-dur-fast: 120ms;
+  --cj-dur-med:  180ms;
+  --cj-ease:     cubic-bezier(0.2, 0, 0, 1);
+}

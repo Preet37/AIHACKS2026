@@ -1,25 +1,6 @@
 import * as Sentry from "@sentry/browser";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Circle,
-  ExternalLink,
-  ImageOff,
-  Loader2,
-  MessageSquareText,
-  Pencil,
-  Puzzle,
-  RefreshCcw,
-  Search,
-  Send,
-  ShoppingBag,
-  Terminal,
-  Trash2,
-  XCircle
-} from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  createAgentTaskUrl,
   createConversationWsUrl,
   createModsBundleUrl,
   createModsUrl,
@@ -27,68 +8,54 @@ import {
   CONJURE_CONFIG
 } from "../shared/config";
 import {
+  DEFAULT_FALLBACK_HOTKEY,
+  FALLBACK_HOTKEY_STORAGE_KEY
+} from "../shared/keybind";
+import {
   BACKGROUND_MESSAGE,
   CLIENT_EVENT,
   CONTENT_MESSAGE,
   SERVER_EVENT,
   type ActiveTabSnapshot,
-  type AgentFinding,
-  type AgentTaskResponse,
   type ApplyModsResult,
-  type AgentProvider,
-  type AgentPullRequest,
   type ClientToServerEvent,
-  type ClientProvider,
+  type CommandShortcutInfo,
+  type ConsoleLevel,
   type ConsoleLogEntry,
   type GeneratedBundle,
   type GetElementHtmlMessage,
   type GetPageContentMessage,
   type ModRecord,
   type PageContentResult,
+  type RuntimeRequest,
   type RuntimeResult,
   type ServerToClientEvent
 } from "../shared/messages";
+import { hostLabel } from "./lib/format";
+import { StatusBar, StatusBlock } from "./components";
 import {
-  PROVIDER_STORAGE_KEY,
-  readProviderSettings,
-  type PersistedProviderSettings
-} from "../shared/providerSettings";
-import { appendDiagnosticLog } from "../shared/diagnosticLogs";
+  SurfaceProvider,
+  type AgentRunState,
+  type ChatMessage,
+  type ConnectionState,
+  type EditingMod,
+  type PanelMode,
+  type PlanningOption,
+  type SurfaceContextValue,
+  type TraceEntry,
+  type TraceStatus,
+  type UiSettings
+} from "./surfaceContext";
+import { RightPanel } from "./surfaces/RightPanel";
+import { Composer } from "./surfaces/Composer";
+import { useFinder, isFindRequest } from "./useFinder";
 
 const SESSION_STORAGE_KEY = "conjure.session";
-
-const USE_CASES = [
-  {
-    label: "Agent button",
-    prompt: "Add an agent button that sends a Hello World email."
-  },
-  {
-    label: "Cross-site mod",
-    prompt: "On Amazon and eBay, highlight products under $50."
-  },
-  {
-    label: "Find one link",
-    prompt: "Find one verified jacket under $100 on this page."
-  }
-] as const;
-
-const isFindRequest = (prompt: string) => /^(find|search|look for|shop for)\b/i.test(prompt);
 
 interface PersistedSession {
   projectId: string;
   conversationId?: string;
   messages: ChatMessage[];
-}
-
-type ConnectionState = "idle" | "connecting" | "connected" | "error";
-type ChatRole = "user" | "assistant" | "system";
-
-interface ChatMessage {
-  id: string;
-  role: ChatRole;
-  content: string;
-  createdAt: number;
-  streaming?: boolean;
 }
 
 interface ToolRun {
@@ -100,15 +67,31 @@ interface ToolRun {
   endedAt?: number;
 }
 
-interface AgentRunState {
-  active: boolean;
-  provider?: AgentProvider;
-  phrase: string;
-  status?: string;
-  statusDetail?: string;
-  sessionUrl?: string;
-  pullRequests: AgentPullRequest[];
-}
+// Workspace blocks for the StatusBar — the [n] index is added by the primitive.
+const panelModes: Array<{ id: string; label: string }> = [
+  { id: "home", label: "home" },
+  { id: "design", label: "design" },
+  { id: "trace", label: "track" },
+  { id: "settings", label: "settings" }
+];
+
+const planningOptions: PlanningOption[] = [
+  {
+    id: "inline",
+    title: "Inline banner at top of page",
+    detail: "Inject a full-width summary block above the site's header."
+  },
+  {
+    id: "side-note",
+    title: "Floating side note",
+    detail: "Anchor a sticky card to the top-right corner."
+  },
+  {
+    id: "panel-only",
+    title: "Only in the Conjure panel",
+    detail: "Pipe the result to the active side-panel view."
+  }
+];
 
 
 const initSentry = () => {
@@ -138,9 +121,33 @@ const captureException = (error: unknown) => {
   }
 };
 
-const recordDiagnosticError = (source: string, error: unknown) => {
-  appendDiagnosticLog(source, error).catch(captureException);
+const getChromeApi = () => {
+  try {
+    if (typeof chrome === "undefined" || !chrome.runtime?.id) return undefined;
+    return chrome;
+  } catch {
+    return undefined;
+  }
 };
+
+const safeRuntimeMessage = async <T,>(message: RuntimeRequest): Promise<RuntimeResult<T> | undefined> => {
+  const chromeApi = getChromeApi();
+  if (!chromeApi?.runtime?.sendMessage) return undefined;
+  try {
+    return (await chromeApi.runtime.sendMessage(message)) as RuntimeResult<T>;
+  } catch {
+    return undefined;
+  }
+};
+
+const previewTabSnapshot = (): ActiveTabSnapshot[] => [
+  {
+    id: 0,
+    title: document.title || "Conjure preview",
+    url: location.href,
+    active: true
+  }
+];
 
 const isRuntimeOk = <T,>(result: RuntimeResult<T> | undefined): result is { ok: true; data: T } =>
   Boolean(result?.ok);
@@ -163,6 +170,17 @@ const readNumber = (record: Record<string, unknown>, ...keys: string[]) => {
     if (typeof value === "string" && value.trim()) return Number(value);
   }
   return undefined;
+};
+
+const readConsoleLevel = (record: Record<string, unknown>): ConsoleLevel | undefined => {
+  const level = readString(record, "level");
+  return level === "debug" ||
+    level === "info" ||
+    level === "log" ||
+    level === "warn" ||
+    level === "error"
+    ? level
+    : undefined;
 };
 
 const fallbackPageScript = (includeHtml: boolean, maxChars: number): PageContentResult => {
@@ -228,12 +246,6 @@ const fallbackElementScript = (selector: string, maxChars: number): PageContentR
   };
 };
 
-const formatTime = (timestamp: number) =>
-  new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(timestamp);
-
 export default function App() {
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const [projectId, setProjectId] = useState(CONJURE_CONFIG.projectId);
@@ -254,22 +266,32 @@ export default function App() {
     pullRequests: []
   });
   const [mods, setMods] = useState<ModRecord[]>([]);
-  const [editingMod, setEditingMod] = useState<{ id: string; prompt: string } | null>(null);
-  const [expandedModId, setExpandedModId] = useState<string | null>(null);
-  const [provider, setProvider] = useState<ClientProvider>("anthropic");
-  const [providerApiKey, setProviderApiKey] = useState("");
+  const [editingMod, setEditingMod] = useState<EditingMod | null>(null);
   const [tools, setTools] = useState<ToolRun[]>([]);
   const [rules, setRules] = useState<string[]>([]);
   const [statusText, setStatusText] = useState("Ready");
-  const [activityPhase, setActivityPhase] = useState<"thinking" | "validating">("thinking");
-  const [findings, setFindings] = useState<AgentFinding[]>([]);
-  const [findingStatus, setFindingStatus] = useState<"idle" | "running" | "done" | "error">("idle");
-  const [findingError, setFindingError] = useState<string | null>(null);
+  const [mode, setMode] = useState<PanelMode>("home");
+  const [showCommand, setShowCommand] = useState(false);
+  const [planningChoice, setPlanningChoice] = useState(planningOptions[0].id);
+  const [planningCustom, setPlanningCustom] = useState("");
+  const [runStartedAt, setRunStartedAt] = useState<number>();
+  const [traceEntries, setTraceEntries] = useState<TraceEntry[]>([]);
+  const [uiSettings, setUiSettings] = useState<UiSettings>({
+    linkedin: true,
+    gmail: true,
+    calendar: false,
+    allowAuthenticatedTabs: false,
+    requireConfirmation: true,
+    voiceAlwaysListening: false,
+    workMode: "planning"
+  });
+  const [commandShortcuts, setCommandShortcuts] = useState<CommandShortcutInfo[]>([]);
+  const [fallbackHotkey, setFallbackHotkeyState] = useState(DEFAULT_FALLBACK_HOTKEY);
 
   const socketRef = useRef<WebSocket | null>(null);
   const pendingOpenRef = useRef<Promise<WebSocket> | null>(null);
   const currentAssistantIdRef = useRef<string | null>(null);
-  const commandInputRef = useRef<HTMLInputElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const hydratedRef = useRef(false);
   const projectIdRef = useRef(projectId);
 
@@ -284,13 +306,116 @@ export default function App() {
     ]);
   }, []);
 
+  const openDesignTab = useCallback(async () => {
+    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.OPEN_DESIGN_TAB });
+  }, []);
+
+  const openTraceTab = useCallback(async () => {
+    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.OPEN_TRACE_TAB });
+  }, []);
+
+  const openSettingsTab = useCallback(async () => {
+    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.OPEN_SETTINGS_TAB });
+  }, []);
+
+  const requestCommandBar = useCallback(async () => {
+    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.TOGGLE_COMMAND_BAR });
+  }, []);
+
+  const refreshCommandShortcuts = useCallback(async () => {
+    const response = await safeRuntimeMessage<CommandShortcutInfo[]>({
+      type: BACKGROUND_MESSAGE.GET_COMMAND_SHORTCUTS
+    });
+    if (isRuntimeOk(response)) setCommandShortcuts(response.data);
+  }, []);
+
+  const openShortcutSettings = useCallback(async () => {
+    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.OPEN_SHORTCUT_SETTINGS });
+  }, []);
+
+  const testCommandOverlay = useCallback(() => {
+    void requestCommandBar();
+  }, [requestCommandBar]);
+
+  const setFallbackHotkey = useCallback((value: string) => {
+    setFallbackHotkeyState(value);
+    const chromeApi = getChromeApi();
+    if (chromeApi?.storage?.local) {
+      chromeApi.storage.local.set({ [FALLBACK_HOTKEY_STORAGE_KEY]: value }).catch(captureException);
+    }
+  }, []);
+
+  const setRoutedMode = useCallback(
+    (nextMode: PanelMode) => {
+      if (nextMode === "design") {
+        void openDesignTab();
+        return;
+      }
+      if (nextMode === "trace") {
+        void openTraceTab();
+        return;
+      }
+      if (nextMode === "settings") {
+        void openSettingsTab();
+        return;
+      }
+      setMode(nextMode);
+    },
+    [openDesignTab, openSettingsTab, openTraceTab]
+  );
+
+  const selectWorkspace = useCallback(
+    (workspaceId: string) => {
+      if (workspaceId === "design") {
+        void openDesignTab();
+        return;
+      }
+      if (workspaceId === "trace") {
+        void openTraceTab();
+        return;
+      }
+      if (workspaceId === "settings") {
+        void openSettingsTab();
+        return;
+      }
+      setMode("home");
+    },
+    [openDesignTab, openSettingsTab, openTraceTab]
+  );
+
+  const appendTrace = useCallback((entry: Omit<TraceEntry, "id" | "timestamp">) => {
+    setTraceEntries((current) =>
+      [
+        ...current,
+        {
+          id: makeId(),
+          timestamp: Date.now(),
+          ...entry
+        }
+      ].slice(-80)
+    );
+  }, []);
+
+  const toggleUiSetting = useCallback((key: keyof typeof uiSettings) => {
+    setUiSettings((current) => {
+      const value = current[key];
+      if (typeof value !== "boolean") return current;
+      return { ...current, [key]: !value };
+    });
+  }, []);
+
   // Register/refresh every active mod in the browser via the service worker.
   const applyModBundles = useCallback(
     async (bundles: GeneratedBundle[]) => {
       if (!bundles.length) return;
+      const chromeApi = getChromeApi();
+      if (!chromeApi?.runtime?.sendMessage) {
+        setStatusText("Preview mode");
+        return;
+      }
       setStatusText("Applying mods to browser");
       try {
-        const response = await chrome.runtime.sendMessage({
+        const response = await safeRuntimeMessage<ApplyModsResult>({
           type: BACKGROUND_MESSAGE.APPLY_MODS,
           bundles
         });
@@ -298,7 +423,7 @@ export default function App() {
           const { applied, reloaded } = response.data;
           setStatusText(`Applied ${applied} mod(s)`);
           if (reloaded > 0) {
-            addSystemMessage(`Applied ${applied} mod(s) and reloaded the current tab.`);
+            addSystemMessage(`Applied ${applied} mod(s) and reloaded ${reloaded} matching tab(s).`);
           }
           return;
         }
@@ -346,7 +471,7 @@ export default function App() {
         }
         const data = (await response.json()) as { mods?: ModRecord[] };
         setMods(data.mods || []);
-        await chrome.runtime.sendMessage({ type: BACKGROUND_MESSAGE.REMOVE_MOD, modId: mod.id });
+        await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.REMOVE_MOD, modId: mod.id });
         setStatusText(`Removed "${mod.name}"`);
         addSystemMessage(`Removed mod "${mod.name}".`);
       } catch (error) {
@@ -358,6 +483,10 @@ export default function App() {
   );
 
   const activeTab = useMemo(() => activeTabs.find((tab) => tab.active) || activeTabs[0], [activeTabs]);
+
+  // "Find on this page" off-device browser agent. Owns its own state machine;
+  // App only routes find-shaped commands to it (see handleSubmit below).
+  const finder = useFinder(captureException);
 
   const sendToServer = useCallback((payload: ClientToServerEvent) => {
     const socket = socketRef.current;
@@ -405,9 +534,16 @@ export default function App() {
     currentAssistantIdRef.current = null;
   }, []);
 
-  const getCurrentTab = useCallback(async () => {
-    const response = await chrome.runtime.sendMessage({
-      type: BACKGROUND_MESSAGE.GET_CURRENT_TAB
+  const getActiveTabs = useCallback(async () => {
+    const chromeApi = getChromeApi();
+    if (!chromeApi?.runtime?.sendMessage) {
+      const previewTabs = previewTabSnapshot();
+      setActiveTabs(previewTabs);
+      return previewTabs;
+    }
+
+    const response = await safeRuntimeMessage<ActiveTabSnapshot[]>({
+      type: BACKGROUND_MESSAGE.GET_ACTIVE_TABS
     });
 
     if (isRuntimeOk<ActiveTabSnapshot[]>(response)) {
@@ -442,36 +578,41 @@ export default function App() {
 
   const getPageContentFromTab = useCallback(
     async (tabId: number, requestId: string, includeHtml: boolean, selector?: string) => {
+      const chromeApi = getChromeApi();
+      if (!chromeApi?.tabs || !chromeApi?.scripting) {
+        throw new Error("Chrome extension tab APIs are not available in preview mode.");
+      }
+
       try {
         if (selector) {
-          const response = await chrome.tabs.sendMessage(tabId, {
+          const response = (await chromeApi.tabs.sendMessage(tabId, {
             type: CONTENT_MESSAGE.GET_ELEMENT_HTML,
             requestId,
             selector,
             maxChars: CONJURE_CONFIG.pageContentMaxChars
-          } satisfies GetElementHtmlMessage);
+          } satisfies GetElementHtmlMessage)) as RuntimeResult<PageContentResult>;
 
           if (isRuntimeOk<PageContentResult>(response)) return response.data;
           throw new Error(response?.error || "Content script could not read the selected element.");
         }
 
-        const response = await chrome.tabs.sendMessage(tabId, {
+        const response = (await chromeApi.tabs.sendMessage(tabId, {
           type: CONTENT_MESSAGE.GET_PAGE_CONTENT,
           requestId,
           includeHtml,
           maxChars: CONJURE_CONFIG.pageContentMaxChars
-        } satisfies GetPageContentMessage);
+        } satisfies GetPageContentMessage)) as RuntimeResult<PageContentResult>;
 
         if (isRuntimeOk<PageContentResult>(response)) return response.data;
         throw new Error(response?.error || "Content script could not read the page.");
       } catch {
         const [{ result }] = selector
-          ? await chrome.scripting.executeScript({
+          ? await chromeApi.scripting.executeScript({
               target: { tabId },
               func: fallbackElementScript,
               args: [selector, CONJURE_CONFIG.pageContentMaxChars]
             })
-          : await chrome.scripting.executeScript({
+          : await chromeApi.scripting.executeScript({
               target: { tabId },
               func: fallbackPageScript,
               args: [includeHtml, CONJURE_CONFIG.pageContentMaxChars]
@@ -481,61 +622,6 @@ export default function App() {
       }
     },
     []
-  );
-
-  // Hand the current URL and its cookies to the off-device browser agent.
-  const runAgentTask = useCallback(
-    async (taskInput: string) => {
-      const task = taskInput.trim();
-      if (!task) return;
-      setFindingStatus("running");
-      setActivityPhase("thinking");
-      setFindingError(null);
-      setFindings([]);
-      setStatusText("Spinning up a cloud browser to search...");
-      try {
-        const tabs = await getCurrentTab();
-        const tab = tabs.find((candidate) => candidate.active) || tabs[0];
-        if (!tab?.url) {
-          throw new Error("No active tab URL to search.");
-        }
-        let cookies: chrome.cookies.Cookie[] = [];
-        try {
-          cookies = await chrome.cookies.getAll({ url: tab.url });
-        } catch {
-          // The remote agent can still search public content while logged out.
-          cookies = [];
-        }
-        const response = await fetch(createAgentTaskUrl(projectIdRef.current), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ task, url: tab.url, cookies })
-        });
-        if (!response.ok) {
-          let detail = `Backend returned ${response.status}.`;
-          try {
-            const body = (await response.json()) as { detail?: string };
-            if (body?.detail) detail = body.detail;
-          } catch {
-            // Non-JSON error body; keep the status-based message.
-          }
-          throw new Error(detail);
-        }
-        const data = (await response.json()) as AgentTaskResponse;
-        const results = data.findings || [];
-        setFindings(results);
-        setFindingStatus("done");
-        setStatusText(
-          results.length ? `Found ${results.length} item(s)` : "No matching items found"
-        );
-      } catch (error) {
-        captureException(error);
-        setFindingStatus("error");
-        setFindingError(error instanceof Error ? error.message : String(error));
-        setStatusText("Agent task failed");
-      }
-    },
-    [getCurrentTab]
   );
 
   const handleRequestTabContent = useCallback(
@@ -569,10 +655,16 @@ export default function App() {
       const tabId = readNumber(event, "tab_id", "tabId") || activeTab?.id;
 
       try {
-        const response = await chrome.runtime.sendMessage({
+        const chromeApi = getChromeApi();
+        if (!chromeApi?.runtime?.sendMessage) {
+          sendConsoleLogsResponse(requestId, { error: "Console logs are unavailable in preview mode." });
+          return;
+        }
+
+        const response = await safeRuntimeMessage<ConsoleLogEntry[]>({
           type: BACKGROUND_MESSAGE.GET_CONSOLE_LOGS,
           tabId,
-          level: readString(event, "level"),
+          level: readConsoleLevel(event),
           since: readNumber(event, "since"),
           limit: 300
         });
@@ -605,11 +697,6 @@ export default function App() {
           appendAssistantContent(event.content);
           return;
         case SERVER_EVENT.TOOL_START:
-          setActivityPhase(
-            ["verify_mod", "validate_extension", "run_in_sandbox"].includes(event.name)
-              ? "validating"
-              : "thinking"
-          );
           setTools((current) => [
             {
               id: `${event.name}-${Date.now()}`,
@@ -620,6 +707,11 @@ export default function App() {
             },
             ...current
           ]);
+          appendTrace({
+            label: `tool: ${event.name}`,
+            detail: event.args ? JSON.stringify(event.args).slice(0, 160) : "started",
+            status: "running"
+          });
           setStatusText(`Running ${event.name}`);
           return;
         case SERVER_EVENT.TOOL_END:
@@ -629,6 +721,11 @@ export default function App() {
             return current.map((tool, toolIndex) =>
               toolIndex === index ? { ...tool, status: "done", endedAt: Date.now() } : tool
             );
+          });
+          appendTrace({
+            label: `tool: ${event.name}`,
+            detail: "completed",
+            status: "done"
           });
           setStatusText("Tool complete");
           return;
@@ -642,13 +739,17 @@ export default function App() {
             sessionUrl: event.session_url,
             pullRequests: event.pull_requests || []
           });
+          appendTrace({
+            label: `${event.provider || "agent"} status`,
+            detail: event.status_detail || event.status || event.phrase,
+            status:
+              event.status === "error" || event.status === "suspended"
+                ? "failed"
+                : event.active
+                  ? "running"
+                  : "done"
+          });
           setStatusText(event.phrase);
-          if (event.status === "error" || event.status === "suspended") {
-            recordDiagnosticError(
-              event.provider === "groq" ? "Groq agent" : "Agent",
-              event.status_detail || event.phrase
-            );
-          }
           return;
         case SERVER_EVENT.THINKING:
           setStatusText("Thinking");
@@ -660,14 +761,50 @@ export default function App() {
           void handleRequestConsoleLogs(raw);
           return;
         case SERVER_EVENT.SANDBOX_START:
+          appendTrace({
+            label: "sandbox start",
+            detail: readString(raw, "target_url", "targetUrl") || "verification started",
+            status: "running",
+            modId: readString(raw, "mod_id", "modId"),
+            targetUrl: readString(raw, "target_url", "targetUrl")
+          });
+          void openTraceTab();
+          setStatusText("Sandbox running");
+          return;
         case SERVER_EVENT.SANDBOX_SCREENSHOT:
-        case SERVER_EVENT.SANDBOX_RESULT:
+          appendTrace({
+            label: "sandbox screenshot",
+            detail: "captured verification frame",
+            status: "done",
+            modId: readString(raw, "mod_id", "modId"),
+            screenshotData: readString(raw, "data", "url")
+          });
+          setStatusText("Sandbox screenshot captured");
+          return;
+        case SERVER_EVENT.SANDBOX_RESULT: {
+          const passed = Boolean(raw.passed);
+          appendTrace({
+            label: passed ? "sandbox passed" : "sandbox failed",
+            detail: Array.isArray(raw.findings)
+              ? raw.findings.map(String).join("; ")
+              : readString(raw, "replay_url", "replayUrl") || "verification complete",
+            status: passed ? "done" : "failed",
+            modId: readString(raw, "mod_id", "modId"),
+            replayUrl: readString(raw, "replay_url", "replayUrl")
+          });
+          setStatusText(passed ? "Sandbox passed" : "Sandbox failed");
+          return;
+        }
         case SERVER_EVENT.SANDBOX_HEALING:
-          setActivityPhase("validating");
+          appendTrace({
+            label: `sandbox healing ${readNumber(raw, "iteration") || ""}`.trim(),
+            detail: readString(raw, "fix_summary", "fixSummary") || "repair iteration",
+            status: "running"
+          });
+          setStatusText("Healing mod");
           return;
         case SERVER_EVENT.EXTENSION_READY: {
           const bundles = (event as { bundles?: GeneratedBundle[] }).bundles || [];
-          setActivityPhase("validating");
           setStatusText("Applying mods");
           void applyModBundles(bundles);
           return;
@@ -684,13 +821,14 @@ export default function App() {
         case SERVER_EVENT.DONE:
           finalizeAssistant(event.content);
           setAgentRun((current) => ({ ...current, active: false }));
+          appendTrace({
+            label: "run complete",
+            detail: event.content ? event.content.slice(0, 180) : "assistant finished",
+            status: "done"
+          });
           setStatusText("Ready");
           return;
         case SERVER_EVENT.ERROR:
-          recordDiagnosticError(
-            agentRun.provider === "groq" || provider === "groq" ? "Groq agent" : "Agent",
-            event.message
-          );
           finalizeAssistant();
           setAgentRun({
             active: false,
@@ -707,6 +845,11 @@ export default function App() {
               createdAt: Date.now()
             }
           ]);
+          appendTrace({
+            label: "run error",
+            detail: event.message,
+            status: "failed"
+          });
           setStatusText("Error");
           return;
         default:
@@ -715,12 +858,12 @@ export default function App() {
     },
     [
       appendAssistantContent,
+      appendTrace,
       applyModBundles,
       finalizeAssistant,
       handleRequestConsoleLogs,
       handleRequestTabContent,
-      agentRun.provider,
-      provider
+      openTraceTab
     ]
   );
 
@@ -742,7 +885,6 @@ export default function App() {
       };
 
       socket.onerror = () => {
-        recordDiagnosticError("WebSocket", "WebSocket connection failed.");
         pendingOpenRef.current = null;
         setConnectionState("error");
         setStatusText("Connection error");
@@ -772,18 +914,21 @@ export default function App() {
 
   const submitChat = useCallback(
     async (query: string, modId?: string) => {
-      const apiKey = providerApiKey.trim();
-      if (!apiKey) {
-        setInput(query);
-        setStatusText(
-          `Add your ${provider === "groq" ? "Groq" : "Anthropic"} API key in Extension options`
-        );
-        chrome.runtime.openOptionsPage().catch(captureException);
-        commandInputRef.current?.focus();
-        return;
-      }
       currentAssistantIdRef.current = null;
-      setActivityPhase("thinking");
+      const startedAt = Date.now();
+      setRunStartedAt(startedAt);
+      setTraceEntries([
+        {
+          id: makeId(),
+          label: modId ? "rebuild requested" : "run requested",
+          detail: query,
+          status: "running",
+          timestamp: startedAt,
+          modId
+        }
+      ]);
+      setMode("trace");
+      setShowCommand(false);
       setAgentRun({
         active: true,
         phrase: "Starting agent...",
@@ -802,7 +947,7 @@ export default function App() {
       ]);
 
       try {
-        const tabs = await getCurrentTab();
+        const tabs = await getActiveTabs();
         const socket = await openSocket();
         socket.send(
           JSON.stringify({
@@ -810,20 +955,16 @@ export default function App() {
             query,
             conversation_id: conversationId,
             active_tabs: tabs,
-            provider,
-            api_key: apiKey,
             ...(modId ? { mod_id: modId } : {})
           } satisfies ClientToServerEvent)
         );
         setStatusText(modId ? "Rebuilding mod" : "Streaming");
       } catch (error) {
         captureException(error);
-        recordDiagnosticError(provider === "groq" ? "Groq agent" : "Agent", error);
-        setAgentRun((current) => ({ ...current, active: false, status: "error" }));
         addSystemMessage(error instanceof Error ? error.message : String(error));
       }
     },
-    [addSystemMessage, conversationId, getCurrentTab, openSocket, provider, providerApiKey]
+    [addSystemMessage, conversationId, getActiveTabs, openSocket]
   );
 
   const handleSubmit = async (event: FormEvent) => {
@@ -831,20 +972,67 @@ export default function App() {
     const query = input.trim();
     if (!query) return;
     setInput("");
-    if (editingMod) {
-      const modId = editingMod.id;
-      setEditingMod(null);
-      await submitChat(query, modId);
-      return;
-    }
+    // Find-shaped prompts go to the off-device browser agent, not the chat/build flow.
     if (isFindRequest(query)) {
-      await runAgentTask(query);
+      setMode("home");
+      void finder.run(query, { url: activeTab?.url, projectId: projectIdRef.current });
       return;
     }
-    setFindingStatus("idle");
-    setFindingError(null);
-    setFindings([]);
+    finder.clear();
+    if (uiSettings.workMode === "planning") {
+      setMode("planning");
+      setMessages((current) => [
+        ...current,
+        { id: makeId(), role: "user", content: query, createdAt: Date.now() }
+      ]);
+      return;
+    }
     await submitChat(query);
+  };
+
+  const handleCommandSubmit = async (query: string) => {
+    const command = query.trim();
+    if (!command) return;
+    setInput("");
+    // Find-shaped prompts go to the off-device browser agent, not the chat/build flow.
+    if (isFindRequest(command)) {
+      setMode("home");
+      void finder.run(command, { url: activeTab?.url, projectId: projectIdRef.current });
+      return;
+    }
+    finder.clear();
+    if (uiSettings.workMode === "planning") {
+      setMode("planning");
+      setMessages((current) => [
+        ...current,
+        { id: makeId(), role: "user", content: command, createdAt: Date.now() }
+      ]);
+      return;
+    }
+    await submitChat(command);
+  };
+
+  const runPlanningBuild = async () => {
+    const selected = planningOptions.find((option) => option.id === planningChoice);
+    const custom = planningCustom.trim();
+    const query = custom
+      ? `Build this browser customization: ${custom}`
+      : `Build this browser customization with ${selected?.title.toLowerCase() || "the selected planning option"}: ${selected?.detail || ""}`;
+    await submitChat(query);
+  };
+
+  const submitModChange = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!editingMod) return;
+    const prompt = editingMod.prompt.trim();
+    if (!prompt) return;
+    const modId = editingMod.id;
+    setEditingMod(null);
+    await submitChat(prompt, modId);
+  };
+
+  const refreshTabs = async () => {
+    await getActiveTabs();
   };
 
   // Restore the previous session so closing/reopening the side panel (or a
@@ -852,7 +1040,28 @@ export default function App() {
   // persistence effect below is allowed to write.
   useEffect(() => {
     let cancelled = false;
-    chrome.storage.local
+    const chromeApi = getChromeApi();
+    if (!chromeApi?.storage?.local) {
+      try {
+        const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+        const session = raw ? (JSON.parse(raw) as PersistedSession) : undefined;
+        if (session) {
+          if (session.projectId) setProjectId(session.projectId);
+          if (session.conversationId) setConversationId(session.conversationId);
+          if (Array.isArray(session.messages) && session.messages.length > 0) {
+            setMessages(session.messages.map((message) => ({ ...message, streaming: false })));
+          }
+        }
+      } catch (error) {
+        captureException(error);
+      }
+      hydratedRef.current = true;
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    chromeApi.storage.local
       .get(SESSION_STORAGE_KEY)
       .then((stored) => {
         if (cancelled) return;
@@ -879,48 +1088,74 @@ export default function App() {
   useEffect(() => {
     if (!hydratedRef.current) return;
     const session: PersistedSession = { projectId, conversationId, messages };
-    chrome.storage.local.set({ [SESSION_STORAGE_KEY]: session }).catch(captureException);
+    const chromeApi = getChromeApi();
+    if (chromeApi?.storage?.local) {
+      chromeApi.storage.local.set({ [SESSION_STORAGE_KEY]: session }).catch(captureException);
+      return;
+    }
+    try {
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    } catch (error) {
+      captureException(error);
+    }
   }, [projectId, conversationId, messages]);
 
   useEffect(() => {
-    let cancelled = false;
-    readProviderSettings()
-      .then((saved) => {
-        if (cancelled) return;
-        setProvider(saved.provider);
-        setProviderApiKey(saved.apiKey);
+    void getActiveTabs();
+    void safeRuntimeMessage({ type: BACKGROUND_MESSAGE.RELOAD_CURRENT_TAB_ONCE });
+  }, [getActiveTabs]);
+
+  useEffect(() => {
+    const chromeApi = getChromeApi();
+    if (!chromeApi?.storage?.local) return;
+    chromeApi.storage.local
+      .get(FALLBACK_HOTKEY_STORAGE_KEY)
+      .then((stored) => {
+        const value = stored[FALLBACK_HOTKEY_STORAGE_KEY];
+        setFallbackHotkeyState(typeof value === "string" ? value : DEFAULT_FALLBACK_HOTKEY);
       })
       .catch(captureException);
-
-    const handleStorageChange = (
-      changes: Record<string, chrome.storage.StorageChange>,
-      areaName: string
-    ) => {
-      if (areaName !== "local" || !changes[PROVIDER_STORAGE_KEY]) return;
-      const saved = changes[PROVIDER_STORAGE_KEY].newValue as
-        | PersistedProviderSettings
-        | undefined;
-      setProvider(saved?.provider === "groq" ? "groq" : "anthropic");
-      setProviderApiKey(typeof saved?.apiKey === "string" ? saved.apiKey : "");
-    };
-    chrome.storage.onChanged.addListener(handleStorageChange);
-    return () => {
-      cancelled = true;
-      chrome.storage.onChanged.removeListener(handleStorageChange);
-    };
   }, []);
 
   useEffect(() => {
-    void getCurrentTab();
-    chrome.runtime
-      .sendMessage({ type: BACKGROUND_MESSAGE.RELOAD_CURRENT_TAB_ONCE })
-      .catch(captureException);
-  }, [getCurrentTab]);
+    void refreshCommandShortcuts();
+  }, [refreshCommandShortcuts]);
 
   // Load the mod list and (re)apply every active mod whenever the project changes.
   useEffect(() => {
     void refreshAndApplyMods(projectId);
   }, [refreshAndApplyMods, projectId]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end" });
+  }, [messages]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        void requestCommandBar();
+        return;
+      }
+
+      if (event.key === "Escape") {
+        setShowCommand(false);
+        return;
+      }
+
+      if (event.altKey) {
+        const modeIndex = Number(event.key) - 1;
+        const selectedMode = panelModes[modeIndex]?.id;
+        if (selectedMode) {
+          event.preventDefault();
+          selectWorkspace(selectedMode);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [requestCommandBar, selectWorkspace]);
 
   useEffect(
     () => () => {
@@ -928,22 +1163,6 @@ export default function App() {
     },
     []
   );
-
-  const busy = agentRun.active || findingStatus === "running";
-  const expandedMod = mods.find((mod) => mod.id === expandedModId);
-
-  const statusIcon =
-    busy ? (
-      <Loader2 aria-hidden="true" className="spin" />
-    ) : connectionState === "connected" ? (
-      <CheckCircle2 aria-hidden="true" />
-    ) : connectionState === "connecting" ? (
-      <Loader2 aria-hidden="true" className="spin" />
-    ) : connectionState === "error" ? (
-      <XCircle aria-hidden="true" />
-    ) : (
-      <Circle aria-hidden="true" />
-    );
 
   const agentStatusClass = agentRun.active
     ? "running"
@@ -960,319 +1179,134 @@ export default function App() {
   const providerLabel =
     agentRun.provider === "claude"
       ? "Claude"
-      : agentRun.provider === "groq"
-        ? "Groq"
       : agentRun.provider === "nemotron"
         ? "Nemotron"
         : agentRun.provider === "devin"
           ? "Devin"
           : "Agent";
 
+  const activeMods = useMemo(() => mods.filter((mod) => mod.status === "active"), [mods]);
+  const latestUser = useMemo(
+    () => [...messages].reverse().find((message) => message.role === "user"),
+    [messages]
+  );
+  const visibleTrace = traceEntries.length
+    ? traceEntries
+    : [
+        {
+          id: "idle",
+          label: "waiting for command",
+          detail: "No active run yet.",
+          status: "pending" as TraceStatus,
+          timestamp: Date.now()
+        }
+      ];
+  const completedTraceCount = traceEntries.filter((entry) => entry.status === "done").length;
+  const traceProgress = traceEntries.length
+    ? Math.max(8, Math.round((completedTraceCount / Math.max(traceEntries.length, 1)) * 100))
+    : 0;
+  const elapsedLabel = runStartedAt
+    ? `${Math.max(0, Math.round((Date.now() - runStartedAt) / 1000))}s`
+    : "0s";
+  const latestScreenshot = [...traceEntries].reverse().find((entry) => entry.screenshotData);
+  const sandboxImageSrc = latestScreenshot?.screenshotData
+    ? latestScreenshot.screenshotData.startsWith("data:")
+      ? latestScreenshot.screenshotData
+      : `data:image/png;base64,${latestScreenshot.screenshotData}`
+    : undefined;
+  const activeScope = hostLabel(activeTab?.url);
+  const selectedPlanningOption =
+    planningOptions.find((option) => option.id === planningChoice) || planningOptions[0];
+
+  const surfaceValue: SurfaceContextValue = {
+    mode,
+    setMode: setRoutedMode,
+    mods,
+    activeMods,
+    refreshAndApplyMods,
+    editingMod,
+    setEditingMod,
+    submitModChange,
+    removeMod,
+    agentRun,
+    agentStatusClass,
+    providerLabel,
+    pullRequestLinks,
+    messages,
+    messagesEndRef,
+    latestUser,
+    traceEntries,
+    visibleTrace,
+    completedTraceCount,
+    traceProgress,
+    elapsedLabel,
+    sandboxImageSrc,
+    activeScope,
+    activeTab,
+    activeTabs,
+    refreshTabs,
+    statusText,
+    connectionState,
+    projectId,
+    setProjectId,
+    planningOptions,
+    planningChoice,
+    setPlanningChoice,
+    planningCustom,
+    setPlanningCustom,
+    selectedPlanningOption,
+    runPlanningBuild,
+    uiSettings,
+    toggleUiSetting,
+    setUiSettings,
+    rules,
+    commandShortcuts,
+    fallbackHotkey,
+    setFallbackHotkey,
+    refreshCommandShortcuts,
+    openShortcutSettings,
+    testCommandOverlay,
+    finder,
+    input,
+    setInput,
+    handleSubmit,
+    showCommand,
+    setShowCommand: (value) => {
+      if (value) void requestCommandBar();
+      else setShowCommand(false);
+    },
+    handleCommandSubmit
+  };
+
+  const connectionStatusState: "active" | "done" | "pending" =
+    connectionState === "connected" ? "active" : connectionState === "idle" ? "done" : "pending";
+
   return (
-    <main className="shell">
-      <header className="topbar">
-        <div className="brand">
-          <div className="brand-mark">
-            <MessageSquareText aria-hidden="true" />
-          </div>
-          <div>
-            <h1>conjure</h1>
-            <p>{busy ? (activityPhase === "validating" ? "Validating…" : "Thinking…") : statusText}</p>
-          </div>
-        </div>
-        <div className={`connection ${busy ? "thinking" : connectionState}`}>
-          {statusIcon}
-          <span>{busy ? (activityPhase === "validating" ? "Validating" : "Thinking") : connectionState}</span>
-        </div>
-      </header>
+    <SurfaceProvider value={surfaceValue}>
+      <main className={`conjure-shell mode-${mode}`}>
+        <aside className="conjure-panel" aria-label="Conjure command interface">
+          <StatusBar
+            workspaces={panelModes}
+            activeId="home"
+            onSelect={selectWorkspace}
+            onBrand={() => void requestCommandBar()}
+            right={
+              <>
+                <StatusBlock
+                  state={connectionStatusState}
+                  pulse={connectionState === "connecting"}
+                  label={`Connection: ${connectionState}`}
+                />
+                <span className="cj-statusbar__status">{statusText}</span>
+              </>
+            }
+          />
 
-      <section className="project-row" aria-label="Project">
-        <label htmlFor="projectId">Project</label>
-        <input
-          id="projectId"
-          value={projectId}
-          onChange={(event) => setProjectId(event.target.value)}
-          disabled={connectionState === "connected"}
-        />
-        <button
-          type="button"
-          title="Refresh current tab"
-          onClick={() => void getCurrentTab()}
-          className="icon-button"
-        >
-          <RefreshCcw aria-hidden="true" />
-        </button>
-      </section>
+          <RightPanel />
 
-      <section className="tabs-strip" aria-label="Current tab">
-        {activeTabs.map((tab) => (
-          <button
-            key={tab.id}
-            className={`tab-chip ${tab.active ? "active" : ""}`}
-            title={tab.url}
-            type="button"
-          >
-            <span>Current tab</span>
-            <strong>{tab.title}</strong>
-          </button>
-        ))}
-      </section>
-
-      <section className="chat-log" aria-label="Conversation">
-        {messages.map((message) => (
-          <article key={message.id} className={`message ${message.role}`}>
-            <div className="message-meta">
-              <span>{message.role}</span>
-              <time>{formatTime(message.createdAt)}</time>
-              {message.streaming ? <Loader2 aria-hidden="true" className="spin small" /> : null}
-            </div>
-            <p>{message.content}</p>
-          </article>
-        ))}
-      </section>
-
-      <section className="workbench agent-workbench" aria-label="Agent progress">
-        <div className="panel-section agent-panel">
-          <div className="section-title">
-            <Terminal aria-hidden="true" />
-            <h2>{providerLabel}</h2>
-          </div>
-
-          <div className={`status-line ${agentStatusClass}`}>
-            {agentRun.active ? (
-              <Loader2 aria-hidden="true" className="spin" />
-            ) : agentStatusClass === "passed" ? (
-              <CheckCircle2 aria-hidden="true" />
-            ) : agentStatusClass === "failed" ? (
-              <AlertTriangle aria-hidden="true" />
-            ) : (
-              <Circle aria-hidden="true" />
-            )}
-            <span>{agentRun.phrase}</span>
-          </div>
-
-          {agentRun.sessionUrl ? (
-            <a className="replay-link" href={agentRun.sessionUrl} target="_blank" rel="noreferrer">
-              <ExternalLink aria-hidden="true" />
-              Agent session
-            </a>
-          ) : null}
-
-          {pullRequestLinks.length ? (
-            <ol className="agent-links">
-              {pullRequestLinks.map((url, index) => (
-                <li key={url}>
-                  <a href={url} target="_blank" rel="noreferrer">
-                    <ExternalLink aria-hidden="true" />
-                    Pull request {index + 1}
-                  </a>
-                </li>
-              ))}
-            </ol>
-          ) : null}
-        </div>
-
-        <div className="panel-section tools-panel">
-          <div className="section-title">
-            <Terminal aria-hidden="true" />
-            <h2>Tools</h2>
-          </div>
-          {tools.length === 0 ? (
-            <p className="empty">No tool calls yet.</p>
-          ) : (
-            <ol className="tool-list">
-              {tools.slice(0, 5).map((tool) => (
-                <li key={tool.id} className={tool.status}>
-                  <span className="tool-icon">
-                    {tool.status === "running" ? (
-                      <Loader2 aria-hidden="true" className="spin" />
-                    ) : (
-                      <CheckCircle2 aria-hidden="true" />
-                    )}
-                  </span>
-                  <span>
-                    <strong>{tool.name}</strong>
-                    {tool.args ? <code>{JSON.stringify(tool.args).slice(0, 120)}</code> : null}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          )}
-        </div>
-      </section>
-
-      <section className="use-cases" aria-label="Example prompts">
-        {USE_CASES.map((useCase) => (
-          <button
-            key={useCase.label}
-            type="button"
-            title={useCase.prompt}
-            disabled={busy}
-            onClick={() => {
-              setEditingMod(null);
-              setInput(useCase.prompt);
-              commandInputRef.current?.focus();
-            }}
-          >
-            <strong>{useCase.label}</strong>
-            <span>{useCase.prompt}</span>
-          </button>
-        ))}
-      </section>
-
-      <section
-        className={`panel-section finder-panel ${findingStatus === "idle" || findingStatus === "running" ? "hidden" : ""}`}
-        aria-label="Verified result"
-      >
-        {findingStatus === "error" && findingError ? (
-          <div className="status-line failed">
-            <AlertTriangle aria-hidden="true" />
-            <span>{findingError}</span>
-          </div>
-        ) : null}
-
-        {findingStatus === "done" && findings.length === 0 ? (
-          <p className="empty">No matching items found on this page.</p>
-        ) : null}
-
-        {findings.length ? (
-          <ul className="finding-list">
-            {findings.map((finding, index) => (
-              <li key={`${finding.url}-${index}`} className="finding-card">
-                <a
-                  className="finding-card-link"
-                  href={finding.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={`Open ${finding.title}`}
-                >
-                  <span className="finding-thumb">
-                    {finding.image ? (
-                      <img src={finding.image} alt="" loading="lazy" />
-                    ) : (
-                      <ImageOff aria-hidden="true" />
-                    )}
-                  </span>
-                  <span className="finding-body">
-                    <span className="finding-title">
-                      {finding.title}
-                      <ExternalLink aria-hidden="true" />
-                    </span>
-                    {finding.price ? <span className="finding-price">{finding.price}</span> : null}
-                    {finding.note ? <span className="finding-note">{finding.note}</span> : null}
-                  </span>
-                </a>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </section>
-
-      <section className="panel-section mods-panel" aria-label="Mods">
-        <div className="section-title">
-          <h2>Mods</h2>
-          <button
-            type="button"
-            title="Refresh and re-apply mods"
-            onClick={() => void refreshAndApplyMods(projectId)}
-            className="icon-button"
-          >
-            <RefreshCcw aria-hidden="true" />
-          </button>
-        </div>
-        {mods.length === 0 ? (
-          <p className="empty">Your mods will appear here.</p>
-        ) : (
-          <div className="mod-orbs">
-            {mods.map((mod) => (
-              <button
-                key={mod.id}
-                type="button"
-                className={`mod-orb ${expandedModId === mod.id ? "active" : ""} ${mod.status}`}
-                title={mod.name}
-                aria-label={mod.name}
-                aria-expanded={expandedModId === mod.id}
-                onClick={() => setExpandedModId((current) => (current === mod.id ? null : mod.id))}
-              >
-                {(mod.name.trim()[0] || "M").toUpperCase()}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {expandedMod ? (
-          <article className="mod-detail">
-            <div className="mod-head">
-              <strong>{expandedMod.name}</strong>
-              <span className={`mod-dot ${expandedMod.last_verified?.passed ? "verified" : ""}`} />
-            </div>
-            <p>{expandedMod.prompt}</p>
-            {expandedMod.websites?.length ? (
-              <div className="mod-websites" aria-label="Supported websites">
-                {expandedMod.websites.map((website) => (
-                  <span key={website}>{website}</span>
-                ))}
-              </div>
-            ) : null}
-            <div className="mod-actions">
-              <button
-                type="button"
-                className="mod-action"
-                onClick={() => {
-                  setEditingMod({ id: expandedMod.id, prompt: expandedMod.prompt });
-                  setInput(expandedMod.prompt);
-                  commandInputRef.current?.focus();
-                }}
-              >
-                <Pencil aria-hidden="true" /> Change
-              </button>
-              <button
-                type="button"
-                className="mod-action danger"
-                onClick={() => {
-                  setExpandedModId(null);
-                  void removeMod(expandedMod);
-                }}
-              >
-                <Trash2 aria-hidden="true" /> Remove
-              </button>
-            </div>
-          </article>
-        ) : null}
-      </section>
-
-      {editingMod ? (
-        <div className="editing-pill">
-          <span>Changing mod</span>
-          <button
-            type="button"
-            onClick={() => {
-              setEditingMod(null);
-              setInput("");
-            }}
-          >
-            Cancel
-          </button>
-        </div>
-      ) : null}
-      <form className="composer" onSubmit={handleSubmit}>
-        <input
-          ref={commandInputRef}
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          placeholder="Build a mod or find something…"
-          disabled={busy}
-          aria-label="What should Conjure do?"
-        />
-        <button
-          type="submit"
-          title="Run"
-          className="send-button"
-          disabled={busy || !input.trim()}
-        >
-          <Send aria-hidden="true" />
-        </button>
-      </form>
-    </main>
+          <Composer />
+        </aside>
+      </main>
+    </SurfaceProvider>
   );
 }

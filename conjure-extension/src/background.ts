@@ -7,12 +7,16 @@ import {
   type ActiveTabSnapshot,
   type ApplyModsMessage,
   type ApplyModsResult,
+  type CommandShortcutInfo,
   type ConsoleLogEntry,
   type ConsoleLevel,
   type ContentConsoleEventMessage,
   type GeneratedBundle,
   type GetConsoleLogsMessage,
   type ModAgentActionMessage,
+  type OpenDesignTabMessage,
+  type OpenSettingsTabMessage,
+  type OpenTraceTabMessage,
   type RemoveModMessage,
   type RuntimeRequest,
   type RuntimeResult
@@ -294,6 +298,14 @@ chrome.storage.local
   .setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })
   .catch(captureException);
 
+const isRuntimeAvailable = () => {
+  try {
+    return Boolean(chrome.runtime?.id);
+  } catch {
+    return false;
+  }
+};
+
 const makeId = () =>
   globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -361,6 +373,116 @@ const getCurrentTab = async (): Promise<RuntimeResult<ActiveTabSnapshot[]>> => {
       .map(activeTabSnapshot)
       .filter((tab): tab is ActiveTabSnapshot => Boolean(tab))
   };
+};
+
+const openExtensionTab = async (page: "design.html" | "run.html"): Promise<RuntimeResult<{ opened: boolean }>> => {
+  if (!isRuntimeAvailable()) return { ok: false, error: "Extension runtime is unavailable." };
+  await chrome.tabs.create({ url: chrome.runtime.getURL(page) });
+  return { ok: true, data: { opened: true } };
+};
+
+const openSettingsTab = async (): Promise<RuntimeResult<{ opened: boolean }>> => {
+  if (!isRuntimeAvailable()) return { ok: false, error: "Extension runtime is unavailable." };
+  await chrome.runtime.openOptionsPage();
+  return { ok: true, data: { opened: true } };
+};
+
+const getCommandShortcuts = async (): Promise<RuntimeResult<CommandShortcutInfo[]>> => {
+  if (!isRuntimeAvailable() || !chrome.commands?.getAll) {
+    return { ok: false, error: "Command shortcuts are unavailable." };
+  }
+  const commands = await chrome.commands.getAll();
+  return {
+    ok: true,
+    data: commands
+      .filter((command): command is chrome.commands.Command & { name: string } => typeof command.name === "string")
+      .map(({ name, description, shortcut }) => ({ name, description, shortcut }))
+  };
+};
+
+const openShortcutSettings = async (): Promise<RuntimeResult<{ opened: boolean; url: string }>> => {
+  const url = "chrome://extensions/shortcuts";
+  if (!isRuntimeAvailable()) return { ok: false, error: "Extension runtime is unavailable." };
+  try {
+    await chrome.tabs.create({ url });
+    return { ok: true, data: { opened: true, url } };
+  } catch {
+    return { ok: false, error: `Open ${url} manually.` };
+  }
+};
+
+const isInjectableTab = (tab?: chrome.tabs.Tab) =>
+  typeof tab?.id === "number" && /^https?:\/\//.test(tab.url || "");
+
+const getActiveTab = async (): Promise<chrome.tabs.Tab | undefined> => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return typeof tab?.id === "number" ? tab : undefined;
+};
+
+const getCommandTargetTab = async (sender?: chrome.runtime.MessageSender): Promise<chrome.tabs.Tab | undefined> => {
+  if (isInjectableTab(sender?.tab)) return sender?.tab;
+
+  const active = await getActiveTab();
+  if (isInjectableTab(active)) return active;
+
+  const currentWindowTabs = await chrome.tabs.query({ currentWindow: true });
+  const currentWindowTarget = currentWindowTabs
+    .filter(isInjectableTab)
+    .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+  if (currentWindowTarget) return currentWindowTarget;
+
+  const allTabs = await chrome.tabs.query({});
+  return allTabs
+    .filter(isInjectableTab)
+    .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+};
+
+const openSidePanelFallback = async (tab?: chrome.tabs.Tab) => {
+  try {
+    if (typeof tab?.windowId === "number") {
+      await chrome.sidePanel.open({ windowId: tab.windowId });
+    }
+  } catch {
+    // Best-effort fallback for restricted pages.
+  }
+};
+
+const ensureContentScript = async (tabId: number) => {
+  try {
+    const loader = chrome.runtime.getManifest().content_scripts?.[0]?.js?.[0];
+    if (!loader) return;
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: [loader]
+    });
+  } catch {
+    // Static content-script registration is the primary path. This best-effort
+    // injection only helps already-open tabs after an extension reload.
+  }
+};
+
+const toggleCommandBar = async (
+  sender?: chrome.runtime.MessageSender
+): Promise<RuntimeResult<{ delivered: boolean; fallback: boolean; tabId?: number }>> => {
+  if (!isRuntimeAvailable()) return { ok: false, error: "Extension runtime is unavailable." };
+  const tab = await getCommandTargetTab(sender);
+  if (typeof tab?.id !== "number") {
+    return { ok: false, error: "No normal webpage tab is available for the command overlay." };
+  }
+
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: CONTENT_MESSAGE.TOGGLE_COMMAND_BAR });
+    return { ok: true, data: { delivered: true, fallback: false, tabId: tab.id } };
+  } catch {
+    await ensureContentScript(tab.id);
+    try {
+      await chrome.tabs.sendMessage(tab.id, { type: CONTENT_MESSAGE.TOGGLE_COMMAND_BAR });
+      return { ok: true, data: { delivered: true, fallback: false, tabId: tab.id } };
+    } catch {
+      await openSidePanelFallback(tab);
+      return { ok: true, data: { delivered: false, fallback: true, tabId: tab.id } };
+    }
+  }
 };
 
 const reloadCurrentTabOnce = async (): Promise<RuntimeResult<{ reloaded: boolean; count: number }>> => {
@@ -445,8 +567,22 @@ const handleRuntimeMessage = async (
       return getConsoleLogs(message);
     case BACKGROUND_MESSAGE.GET_CURRENT_TAB:
       return getCurrentTab();
+    case BACKGROUND_MESSAGE.GET_ACTIVE_TABS:
+      return getCurrentTab();
     case BACKGROUND_MESSAGE.RELOAD_CURRENT_TAB_ONCE:
       return reloadCurrentTabOnce();
+    case BACKGROUND_MESSAGE.OPEN_DESIGN_TAB:
+      return openExtensionTab("design.html");
+    case BACKGROUND_MESSAGE.OPEN_TRACE_TAB:
+      return openExtensionTab("run.html");
+    case BACKGROUND_MESSAGE.OPEN_SETTINGS_TAB:
+      return openSettingsTab();
+    case BACKGROUND_MESSAGE.GET_COMMAND_SHORTCUTS:
+      return getCommandShortcuts();
+    case BACKGROUND_MESSAGE.OPEN_SHORTCUT_SETTINGS:
+      return openShortcutSettings();
+    case BACKGROUND_MESSAGE.TOGGLE_COMMAND_BAR:
+      return toggleCommandBar(sender);
     case BACKGROUND_MESSAGE.APPLY_MODS:
       return applyMods(message as ApplyModsMessage);
     case BACKGROUND_MESSAGE.REMOVE_MOD:
@@ -472,6 +608,12 @@ chrome.runtime.onStartup.addListener(() => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   consoleLogsByTab.delete(tabId);
+});
+
+chrome.commands.onCommand.addListener((command) => {
+  if (command === "toggle-command-bar") {
+    toggleCommandBar().catch(captureException);
+  }
 });
 
 chrome.runtime.onMessage.addListener((message: RuntimeRequest, sender, sendResponse) => {

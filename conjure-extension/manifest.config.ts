@@ -16,15 +16,33 @@ export default defineManifest((env) => ({
     page: "src/options/index.html",
     open_in_tab: true
   },
+  commands: {
+    "toggle-command-bar": {
+      suggested_key: {
+        default: "Ctrl+K",
+        mac: "Command+K"
+      },
+      description: "Open the Conjure command bar"
+    }
+  },
   background: {
     service_worker: "src/background.ts",
     type: "module"
   },
+  content_security_policy: {
+    extension_pages: "script-src 'self'; object-src 'self'; font-src 'self'"
+  },
   content_scripts: [
     {
-      matches: ["http://*/*", "https://*/*"],
+      matches: ["<all_urls>"],
       js: ["src/content/main.tsx"],
       run_at: "document_start"
+    }
+  ],
+  web_accessible_resources: [
+    {
+      resources: ["fonts/*"],
+      matches: ["<all_urls>"]
     }
   ],
   permissions: ["sidePanel", "storage", "tabs", "scripting", "cookies", "userScripts"],
