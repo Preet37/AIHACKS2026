@@ -11,6 +11,9 @@ import {
   type ContentConsoleEventMessage,
   type GeneratedBundle,
   type GetConsoleLogsMessage,
+  type OpenDesignTabMessage,
+  type OpenSettingsTabMessage,
+  type OpenTraceTabMessage,
   type RemoveModMessage,
   type RuntimeRequest,
   type RuntimeResult
@@ -200,6 +203,14 @@ const captureException = (error: unknown) => {
   }
 };
 
+const isRuntimeAvailable = () => {
+  try {
+    return Boolean(chrome.runtime?.id);
+  } catch {
+    return false;
+  }
+};
+
 const makeId = () =>
   globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -269,6 +280,49 @@ const getActiveTabs = async (): Promise<RuntimeResult<ActiveTabSnapshot[]>> => {
   };
 };
 
+const openExtensionTab = async (page: "design.html" | "run.html"): Promise<RuntimeResult<{ opened: boolean }>> => {
+  if (!isRuntimeAvailable()) return { ok: false, error: "Extension runtime is unavailable." };
+  await chrome.tabs.create({ url: chrome.runtime.getURL(page) });
+  return { ok: true, data: { opened: true } };
+};
+
+const openSettingsTab = async (): Promise<RuntimeResult<{ opened: boolean }>> => {
+  if (!isRuntimeAvailable()) return { ok: false, error: "Extension runtime is unavailable." };
+  await chrome.runtime.openOptionsPage();
+  return { ok: true, data: { opened: true } };
+};
+
+const getActiveTab = async (): Promise<chrome.tabs.Tab | undefined> => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return typeof tab?.id === "number" ? tab : undefined;
+};
+
+const openSidePanelFallback = async (tab?: chrome.tabs.Tab) => {
+  try {
+    if (typeof tab?.windowId === "number") {
+      await chrome.sidePanel.open({ windowId: tab.windowId });
+    }
+  } catch {
+    // Best-effort fallback for restricted pages.
+  }
+};
+
+const toggleCommandBar = async (): Promise<RuntimeResult<{ delivered: boolean; fallback: boolean }>> => {
+  if (!isRuntimeAvailable()) return { ok: false, error: "Extension runtime is unavailable." };
+  const tab = await getActiveTab();
+  if (typeof tab?.id !== "number") {
+    return { ok: false, error: "No active tab is available." };
+  }
+
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: CONTENT_MESSAGE.TOGGLE_COMMAND_BAR });
+    return { ok: true, data: { delivered: true, fallback: false } };
+  } catch {
+    await openSidePanelFallback(tab);
+    return { ok: true, data: { delivered: false, fallback: true } };
+  }
+};
+
 const reloadAllTabsOnce = async (): Promise<RuntimeResult<{ reloaded: boolean; count: number }>> => {
   const stored = await chrome.storage.local.get(RELOAD_KEY);
   if (stored[RELOAD_KEY]) {
@@ -297,6 +351,14 @@ const handleRuntimeMessage = async (
       return getConsoleLogs(message);
     case BACKGROUND_MESSAGE.GET_ACTIVE_TABS:
       return getActiveTabs();
+    case BACKGROUND_MESSAGE.OPEN_DESIGN_TAB:
+      return openExtensionTab("design.html");
+    case BACKGROUND_MESSAGE.OPEN_TRACE_TAB:
+      return openExtensionTab("run.html");
+    case BACKGROUND_MESSAGE.OPEN_SETTINGS_TAB:
+      return openSettingsTab();
+    case BACKGROUND_MESSAGE.TOGGLE_COMMAND_BAR:
+      return toggleCommandBar();
     case BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE:
       return reloadAllTabsOnce();
     case BACKGROUND_MESSAGE.APPLY_MODS:
@@ -322,6 +384,12 @@ chrome.runtime.onStartup.addListener(() => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   consoleLogsByTab.delete(tabId);
+});
+
+chrome.commands.onCommand.addListener((command) => {
+  if (command === "toggle-command-bar") {
+    toggleCommandBar().catch(captureException);
+  }
 });
 
 chrome.runtime.onMessage.addListener((message: RuntimeRequest, sender, sendResponse) => {

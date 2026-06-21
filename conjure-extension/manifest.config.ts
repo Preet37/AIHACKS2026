@@ -12,6 +12,19 @@ export default defineManifest((env) => ({
   side_panel: {
     default_path: "index.html"
   },
+  options_ui: {
+    page: "settings.html",
+    open_in_tab: true
+  },
+  commands: {
+    "toggle-command-bar": {
+      suggested_key: {
+        default: "Ctrl+K",
+        mac: "Command+K"
+      },
+      description: "Open the Conjure command bar"
+    }
+  },
   background: {
     service_worker: "src/background.ts",
     type: "module"
@@ -21,7 +34,7 @@ export default defineManifest((env) => ({
   },
   content_scripts: [
     {
-      matches: ["http://*/*", "https://*/*"],
+      matches: ["<all_urls>"],
       js: ["src/content/main.tsx"],
       run_at: "document_start"
     }

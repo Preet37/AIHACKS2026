@@ -41,10 +41,8 @@ import {
   type TraceStatus,
   type UiSettings
 } from "./surfaceContext";
-import { LeftStage } from "./surfaces/LeftStage";
 import { RightPanel } from "./surfaces/RightPanel";
 import { Composer } from "./surfaces/Composer";
-import { CommandPalette } from "./surfaces/CommandPalette";
 
 const SESSION_STORAGE_KEY = "conjure.session";
 
@@ -64,11 +62,10 @@ interface ToolRun {
 }
 
 // Workspace blocks for the StatusBar — the [n] index is added by the primitive.
-const panelModes: Array<{ id: PanelMode; label: string }> = [
+const panelModes: Array<{ id: string; label: string }> = [
   { id: "home", label: "home" },
-  { id: "planning", label: "plan" },
   { id: "design", label: "design" },
-  { id: "trace", label: "trace" },
+  { id: "trace", label: "track" },
   { id: "settings", label: "settings" }
 ];
 
@@ -300,6 +297,60 @@ export default function App() {
       { id: makeId(), role: "system", content, createdAt: Date.now() }
     ]);
   }, []);
+
+  const openDesignTab = useCallback(async () => {
+    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.OPEN_DESIGN_TAB });
+  }, []);
+
+  const openTraceTab = useCallback(async () => {
+    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.OPEN_TRACE_TAB });
+  }, []);
+
+  const openSettingsTab = useCallback(async () => {
+    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.OPEN_SETTINGS_TAB });
+  }, []);
+
+  const requestCommandBar = useCallback(async () => {
+    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.TOGGLE_COMMAND_BAR });
+  }, []);
+
+  const setRoutedMode = useCallback(
+    (nextMode: PanelMode) => {
+      if (nextMode === "design") {
+        void openDesignTab();
+        return;
+      }
+      if (nextMode === "trace") {
+        void openTraceTab();
+        return;
+      }
+      if (nextMode === "settings") {
+        void openSettingsTab();
+        return;
+      }
+      setMode(nextMode);
+    },
+    [openDesignTab, openSettingsTab, openTraceTab]
+  );
+
+  const selectWorkspace = useCallback(
+    (workspaceId: string) => {
+      if (workspaceId === "design") {
+        void openDesignTab();
+        return;
+      }
+      if (workspaceId === "trace") {
+        void openTraceTab();
+        return;
+      }
+      if (workspaceId === "settings") {
+        void openSettingsTab();
+        return;
+      }
+      setMode("home");
+    },
+    [openDesignTab, openSettingsTab, openTraceTab]
+  );
 
   const appendTrace = useCallback((entry: Omit<TraceEntry, "id" | "timestamp">) => {
     setTraceEntries((current) =>
@@ -682,7 +733,7 @@ export default function App() {
             modId: readString(raw, "mod_id", "modId"),
             targetUrl: readString(raw, "target_url", "targetUrl")
           });
-          setMode("trace");
+          void openTraceTab();
           setStatusText("Sandbox running");
           return;
         case SERVER_EVENT.SANDBOX_SCREENSHOT:
@@ -776,7 +827,8 @@ export default function App() {
       applyModBundles,
       finalizeAssistant,
       handleRequestConsoleLogs,
-      handleRequestTabContent
+      handleRequestTabContent,
+      openTraceTab
     ]
   );
 
@@ -1001,7 +1053,7 @@ export default function App() {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setShowCommand((current) => !current);
+        void requestCommandBar();
         return;
       }
 
@@ -1015,14 +1067,14 @@ export default function App() {
         const selectedMode = panelModes[modeIndex]?.id;
         if (selectedMode) {
           event.preventDefault();
-          setMode(selectedMode);
+          selectWorkspace(selectedMode);
         }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [requestCommandBar, selectWorkspace]);
 
   useEffect(
     () => () => {
@@ -1087,7 +1139,7 @@ export default function App() {
 
   const surfaceValue: SurfaceContextValue = {
     mode,
-    setMode,
+    setMode: setRoutedMode,
     mods,
     activeMods,
     refreshAndApplyMods,
@@ -1131,7 +1183,10 @@ export default function App() {
     setInput,
     handleSubmit,
     showCommand,
-    setShowCommand,
+    setShowCommand: (value) => {
+      if (value) void requestCommandBar();
+      else setShowCommand(false);
+    },
     handleCommandSubmit
   };
 
@@ -1141,14 +1196,12 @@ export default function App() {
   return (
     <SurfaceProvider value={surfaceValue}>
       <main className={`conjure-shell mode-${mode}`}>
-        <LeftStage />
-
         <aside className="conjure-panel" aria-label="Conjure command interface">
           <StatusBar
             workspaces={panelModes}
-            activeId={mode}
-            onSelect={(id) => setMode(id as PanelMode)}
-            onBrand={() => setShowCommand(true)}
+            activeId="home"
+            onSelect={selectWorkspace}
+            onBrand={() => void requestCommandBar()}
             right={
               <>
                 <StatusBlock
@@ -1165,8 +1218,6 @@ export default function App() {
 
           <Composer />
         </aside>
-
-        {showCommand ? <CommandPalette /> : null}
       </main>
     </SurfaceProvider>
   );

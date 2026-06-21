@@ -1,7 +1,8 @@
 export const CONTENT_MESSAGE = {
   CONSOLE_EVENT: "conjure:console_event",
   GET_PAGE_CONTENT: "conjure:get_page_content",
-  GET_ELEMENT_HTML: "conjure:get_element_html"
+  GET_ELEMENT_HTML: "conjure:get_element_html",
+  TOGGLE_COMMAND_BAR: "conjure:toggle_command_bar"
 } as const;
 
 export const BACKGROUND_MESSAGE = {
@@ -9,7 +10,11 @@ export const BACKGROUND_MESSAGE = {
   GET_CONSOLE_LOGS: "conjure:get_console_logs",
   RELOAD_ALL_TABS_ONCE: "conjure:reload_all_tabs_once",
   APPLY_MODS: "conjure:apply_mods",
-  REMOVE_MOD: "conjure:remove_mod"
+  REMOVE_MOD: "conjure:remove_mod",
+  OPEN_DESIGN_TAB: "conjure:open_design_tab",
+  OPEN_TRACE_TAB: "conjure:open_trace_tab",
+  OPEN_SETTINGS_TAB: "conjure:open_settings_tab",
+  TOGGLE_COMMAND_BAR: "conjure:toggle_command_bar"
 } as const;
 
 export const CLIENT_EVENT = {
@@ -105,6 +110,10 @@ export interface GetElementHtmlMessage {
   maxChars?: number;
 }
 
+export interface ToggleCommandBarContentMessage {
+  type: typeof CONTENT_MESSAGE.TOGGLE_COMMAND_BAR;
+}
+
 export interface GetActiveTabsMessage {
   type: typeof BACKGROUND_MESSAGE.GET_ACTIVE_TABS;
 }
@@ -159,6 +168,22 @@ export interface RemoveModMessage {
   modId: string;
 }
 
+export interface OpenDesignTabMessage {
+  type: typeof BACKGROUND_MESSAGE.OPEN_DESIGN_TAB;
+}
+
+export interface OpenTraceTabMessage {
+  type: typeof BACKGROUND_MESSAGE.OPEN_TRACE_TAB;
+}
+
+export interface OpenSettingsTabMessage {
+  type: typeof BACKGROUND_MESSAGE.OPEN_SETTINGS_TAB;
+}
+
+export interface ToggleCommandBarBackgroundMessage {
+  type: typeof BACKGROUND_MESSAGE.TOGGLE_COMMAND_BAR;
+}
+
 export interface ApplyModsResult {
   applied: number;
   removed: number;
@@ -169,11 +194,16 @@ export type RuntimeRequest =
   | ContentConsoleEventMessage
   | GetPageContentMessage
   | GetElementHtmlMessage
+  | ToggleCommandBarContentMessage
   | GetActiveTabsMessage
   | GetConsoleLogsMessage
   | ReloadAllTabsOnceMessage
   | ApplyModsMessage
-  | RemoveModMessage;
+  | RemoveModMessage
+  | OpenDesignTabMessage
+  | OpenTraceTabMessage
+  | OpenSettingsTabMessage
+  | ToggleCommandBarBackgroundMessage;
 
 export interface ChatClientEvent {
   type: typeof CLIENT_EVENT.CHAT;
