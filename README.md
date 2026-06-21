@@ -29,6 +29,7 @@ Required config groups:
 - Devin: `DEVIN_API_KEY`, `DEVIN_ORG_ID`, API base URL, agent mode, repositories, branch, and polling settings
 - Claude: `ANTHROPIC_API_KEY` and `CONJURE_ANTHROPIC_MODEL`
 - Nemotron: `NVIDIA_API_KEY`, `NVIDIA_MODEL`, and optional `NVIDIA_API_BASE_URL` for self-hosted NIM
+- Orkes AgentSpan: powers the side-panel "Find on this page" button. Run the runtime with `agentspan server start` (serves `http://localhost:6767`), set `AGENTSPAN_SERVER_URL`, `AGENTSPAN_LLM_MODEL` (e.g. `anthropic/claude-sonnet-4-6`), and `AGENTSPAN_MAX_RESULTS`. The agent uses the model's provider key (`ANTHROPIC_API_KEY` for an `anthropic/` model)
 - Redis: `REDIS_URL`, `REDIS_NAMESPACE`, sandbox cache TTL
 - Browserbase: API key, project ID, session settings
 - Simular: API key and optional endpoint/model override
@@ -100,3 +101,4 @@ When backend and extension implementations arrive, add focused tests under `test
 - Simular owns autonomous functional, crash, and security passes against the Browserbase session.
 - Sentry should use separate environments or projects for backend, extension, and sandbox crashes.
 - Generated extension artifacts belong in `demo_code/` and are ignored by Git.
+- The side-panel "Find on this page" button scrapes the active tab and posts it to `POST /projects/{id}/agent-task`, which runs an Orkes AgentSpan agent over the page and returns matching items (title, image, link, price) as result cards. Requires a running AgentSpan server (`agentspan server start`) and the model's provider key; there is no demo fallback.

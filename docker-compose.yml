@@ -1,9 +1,11 @@
-# Local Redis for conjure: datastore + sandbox cache + job streams.
-# Reproducible on any machine with Docker Desktop:
-#   docker compose up -d        # start Redis on localhost:6379
+# Local infra for conjure. One command brings up everything:
+#   docker compose up -d        # Redis (:6379) + AgentSpan server (:6767) + its Postgres
 #   docker compose ps           # check status
-#   docker compose down         # stop (data persists in the named volume)
+#   docker compose down         # stop (data persists in named volumes)
 #   docker compose down -v      # stop AND wipe data
+#
+# Variable substitution (e.g. ${ANTHROPIC_API_KEY}) is read from the repo .env,
+# so the AgentSpan server reuses the same Anthropic key the backend uses.
 services:
   redis:
     image: redis:7-alpine          # pinned so every machine runs the same Redis
@@ -20,5 +22,51 @@ services:
       timeout: 3s
       retries: 5
 
+  # Postgres backing store for the AgentSpan server (official deployment uses it).
+  agentspan-postgres:
+    image: postgres:16-alpine
+    container_name: conjure-agentspan-postgres
+    environment:
+      POSTGRES_USER: agentspan
+      POSTGRES_PASSWORD: "${AGENTSPAN_POSTGRES_PASSWORD:-agentspan}"
+      POSTGRES_DB: agentspan
+    volumes:
+      - conjure-agentspan-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentspan -d agentspan"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  # Orkes AgentSpan runtime + dashboard. Powers the "Find on this page" button.
+  # The server makes the LLM call, so it gets the provider key from .env.
+  agentspan:
+    image: "${AGENTSPAN_IMAGE:-agentspan/server:latest}"
+    container_name: conjure-agentspan
+    depends_on:
+      agentspan-postgres:
+        condition: service_healthy
+    ports:
+      - "6767:6767"                # matches AGENTSPAN_SERVER_URL=http://localhost:6767/api
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      AGENTSPAN_MASTER_KEY: "${AGENTSPAN_MASTER_KEY:-}"
+      SPRING_PROFILES_ACTIVE: postgres
+      SPRING_DATASOURCE_URL: jdbc:postgresql://agentspan-postgres:5432/agentspan
+      SPRING_DATASOURCE_USERNAME: agentspan
+      SPRING_DATASOURCE_PASSWORD: "${AGENTSPAN_POSTGRES_PASSWORD:-agentspan}"
+      JAVA_TOOL_OPTIONS: "${JAVA_TOOL_OPTIONS:--Xms512m -Xmx1536m -XX:+UseG1GC -XX:MaxGCPauseMillis=200}"
+      LOGGING_LEVEL_ROOT: "${LOGGING_LEVEL_ROOT:-WARN}"
+      LOGGING_LEVEL_DEV_AGENTSPAN: "${LOGGING_LEVEL_DEV_AGENTSPAN:-INFO}"
+      # Provider keys (reused from the same .env; set the one your model uses).
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+    restart: unless-stopped
+
 volumes:
   conjure-redis-data:
+  conjure-agentspan-postgres-data:

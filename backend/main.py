@@ -7,9 +7,12 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
+from .utils import browser_agent
 from .utils import mods as mods_registry
 from .utils.agent import ConjureAgent
+from .utils.browser_agent import BrowserAgentError, BrowserAgentSettings
 from .utils.config import load_settings
 from .utils.memory import extract_and_save_rules
 from .utils.store import create_store
@@ -31,6 +34,59 @@ app.add_middleware(
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "conjure-backend"}
+
+
+class AgentTaskRequest(BaseModel):
+    """A 'find items' task run by an off-device Browserbase cloud browser (Stagehand).
+
+    The extension sends the current tab URL plus the user's cookies, so the cloud
+    browser browses as the logged-in user, off-device — it is not the user's browser."""
+
+    task: str
+    url: str = ""
+    cookies: list[dict[str, Any]] = []
+
+
+@app.post("/projects/{project_id}/agent-task")
+async def run_agent_task(project_id: str, payload: AgentTaskRequest) -> dict[str, Any]:
+    """Run an off-device browse (Browserbase + Stagehand) and return findings."""
+    task = payload.task.strip()
+    if not task:
+        raise HTTPException(status_code=400, detail="task is required")
+    if not payload.url.strip():
+        raise HTTPException(status_code=400, detail="url is required")
+
+    settings = load_settings()
+    browse_settings = BrowserAgentSettings(
+        browserbase_api_key=settings.browserbase_api_key,
+        browserbase_project_id=settings.browserbase_project_id,
+        model=settings.browse_model,
+        model_api_key=settings.anthropic_api_key,
+        max_results=settings.browse_max_results,
+        max_steps=settings.browse_max_steps,
+    )
+    blocker = browser_agent.missing_requirement(browse_settings)
+    if blocker:
+        raise HTTPException(status_code=503, detail=blocker)
+
+    try:
+        result = await browser_agent.find_items_remote(
+            task=task,
+            settings=browse_settings,
+            start_url=payload.url,
+            cookies=payload.cookies,
+        )
+    except BrowserAgentError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return {
+        "project_id": project_id,
+        "task": task,
+        "url": payload.url,
+        "findings": result.get("findings", []),
+        "session_id": result.get("session_id", ""),
+        "replay_url": result.get("replay_url", ""),
+    }
 
 
 @app.get("/projects/{project_id}/mods")

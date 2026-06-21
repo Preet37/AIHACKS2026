@@ -4,18 +4,22 @@ import {
   CheckCircle2,
   Circle,
   ExternalLink,
+  ImageOff,
   Loader2,
   MessageSquareText,
   Pencil,
   Puzzle,
   RefreshCcw,
+  Search,
   Send,
+  ShoppingBag,
   Terminal,
   Trash2,
   XCircle
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  createAgentTaskUrl,
   createConversationWsUrl,
   createModsBundleUrl,
   createModsUrl,
@@ -28,6 +32,8 @@ import {
   CONTENT_MESSAGE,
   SERVER_EVENT,
   type ActiveTabSnapshot,
+  type AgentFinding,
+  type AgentTaskResponse,
   type ApplyModsResult,
   type AgentProvider,
   type AgentPullRequest,
@@ -224,6 +230,10 @@ export default function App() {
   const [tools, setTools] = useState<ToolRun[]>([]);
   const [rules, setRules] = useState<string[]>([]);
   const [statusText, setStatusText] = useState("Ready");
+  const [agentTask, setAgentTask] = useState("");
+  const [findings, setFindings] = useState<AgentFinding[]>([]);
+  const [findingStatus, setFindingStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [findingError, setFindingError] = useState<string | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const pendingOpenRef = useRef<Promise<WebSocket> | null>(null);
@@ -440,6 +450,59 @@ export default function App() {
       }
     },
     []
+  );
+
+  // Scrape the active tab and hand it to the Fetch.ai agent to find matching items.
+  const runAgentTask = useCallback(
+    async (taskInput: string) => {
+      const task = taskInput.trim();
+      if (!task) return;
+      setFindingStatus("running");
+      setFindingError(null);
+      setFindings([]);
+      setStatusText("Fetch.ai agent is searching this page...");
+      try {
+        const tabs = await getActiveTabs();
+        const tab = tabs.find((candidate) => candidate.active) || tabs[0];
+        if (!tab?.id) {
+          throw new Error("No active tab available to search.");
+        }
+        const page = await getPageContentFromTab(tab.id, makeId(), true);
+        const response = await fetch(createAgentTaskUrl(projectIdRef.current), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            task,
+            url: page.url,
+            text: page.text,
+            html: page.html
+          })
+        });
+        if (!response.ok) {
+          let detail = `Backend returned ${response.status}.`;
+          try {
+            const body = (await response.json()) as { detail?: string };
+            if (body?.detail) detail = body.detail;
+          } catch {
+            // Non-JSON error body; keep the status-based message.
+          }
+          throw new Error(detail);
+        }
+        const data = (await response.json()) as AgentTaskResponse;
+        const results = data.findings || [];
+        setFindings(results);
+        setFindingStatus("done");
+        setStatusText(
+          results.length ? `Found ${results.length} item(s)` : "No matching items found"
+        );
+      } catch (error) {
+        captureException(error);
+        setFindingStatus("error");
+        setFindingError(error instanceof Error ? error.message : String(error));
+        setStatusText("Agent task failed");
+      }
+    },
+    [getActiveTabs, getPageContentFromTab]
   );
 
   const handleRequestTabContent = useCallback(
@@ -708,6 +771,11 @@ export default function App() {
     await submitChat(prompt, modId);
   };
 
+  const submitAgentTask = async (event: FormEvent) => {
+    event.preventDefault();
+    await runAgentTask(agentTask);
+  };
+
   const refreshTabs = async () => {
     await getActiveTabs();
   };
@@ -929,6 +997,82 @@ export default function App() {
             </ol>
           )}
         </div>
+      </section>
+
+      <section className="panel-section finder-panel" aria-label="Find on this page">
+        <div className="section-title">
+          <ShoppingBag aria-hidden="true" />
+          <h2>Find on this page</h2>
+        </div>
+        <p className="finder-hint">
+          Have a Fetch.ai agent look through the page you are on. Try "jackets under $100".
+        </p>
+        <form className="finder-form" onSubmit={submitAgentTask}>
+          <input
+            value={agentTask}
+            onChange={(event) => setAgentTask(event.target.value)}
+            placeholder="What should the agent find here?"
+            disabled={findingStatus === "running"}
+          />
+          <button
+            type="submit"
+            className="finder-button"
+            title="Run the agent on this page"
+            disabled={findingStatus === "running" || !agentTask.trim()}
+          >
+            {findingStatus === "running" ? (
+              <Loader2 aria-hidden="true" className="spin" />
+            ) : (
+              <Search aria-hidden="true" />
+            )}
+            <span>Find</span>
+          </button>
+        </form>
+
+        {findingStatus === "error" && findingError ? (
+          <div className="status-line failed">
+            <AlertTriangle aria-hidden="true" />
+            <span>{findingError}</span>
+          </div>
+        ) : null}
+
+        {findingStatus === "done" && findings.length === 0 ? (
+          <p className="empty">No matching items found on this page.</p>
+        ) : null}
+
+        {findings.length ? (
+          <ul className="finding-list">
+            {findings.map((finding, index) => (
+              <li key={`${finding.url}-${index}`} className="finding-card">
+                <a
+                  className="finding-thumb"
+                  href={finding.url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {finding.image ? (
+                    <img src={finding.image} alt={finding.title} loading="lazy" />
+                  ) : (
+                    <ImageOff aria-hidden="true" />
+                  )}
+                </a>
+                <div className="finding-body">
+                  <a
+                    className="finding-title"
+                    href={finding.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {finding.title}
+                    <ExternalLink aria-hidden="true" />
+                  </a>
+                  {finding.price ? <span className="finding-price">{finding.price}</span> : null}
+                  {finding.note ? <span className="finding-note">{finding.note}</span> : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </section>
 
       <section className="panel-section mods-panel" aria-label="Mods">
