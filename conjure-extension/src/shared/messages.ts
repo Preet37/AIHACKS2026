@@ -1,7 +1,8 @@
 export const CONTENT_MESSAGE = {
   CONSOLE_EVENT: "conjure:console_event",
   GET_PAGE_CONTENT: "conjure:get_page_content",
-  GET_ELEMENT_HTML: "conjure:get_element_html"
+  GET_ELEMENT_HTML: "conjure:get_element_html",
+  VOICE_HOTKEY: "conjure:voice_hotkey"
 } as const;
 
 export const BACKGROUND_MESSAGE = {

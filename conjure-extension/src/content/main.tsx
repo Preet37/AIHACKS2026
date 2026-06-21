@@ -263,6 +263,22 @@ window.addEventListener("message", (event) => {
     .catch(() => undefined);
 });
 
+// Relay Alt/Option key events from the active page to the side panel so the
+// voice hotkey works even when the page (not the side panel) has focus.
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "Alt" || e.ctrlKey || e.metaKey || e.shiftKey || e.repeat) return;
+  chrome.runtime
+    .sendMessage({ type: CONTENT_MESSAGE.VOICE_HOTKEY, event: "keydown" })
+    .catch(() => undefined);
+});
+
+window.addEventListener("keyup", (e) => {
+  if (e.key !== "Alt") return;
+  chrome.runtime
+    .sendMessage({ type: CONTENT_MESSAGE.VOICE_HOTKEY, event: "keyup" })
+    .catch(() => undefined);
+});
+
 installIsolatedWorldHooks();
 
 if (document.documentElement) {

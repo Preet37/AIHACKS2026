@@ -223,18 +223,28 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
     }
   }, [onTranscript, stopAmplitudeLoop, stopStream]);
 
-  // ── Activate mic from button click (guaranteed user gesture) ─────────────
+  // ── Activate / stop mic from button click (guaranteed user gesture) ──────
 
   const activateMic = useCallback(async () => {
+    // If already recording in lock mode → stop + transcribe
+    if (isLockedRef.current) {
+      isLockedRef.current = false;
+      isHoldingRef.current = false;
+      if (pttTimerRef.current) { clearTimeout(pttTimerRef.current); pttTimerRef.current = null; }
+      pendingReleaseRef.current = false;
+      await closeMicRef.current();
+      return;
+    }
     if (voiceState !== "idle") return;
     setVoiceError(null);
-    const ok = await openMic();
+    const ok = await openMicRef.current();
     if (ok) {
-      isHoldingRef.current = true;
-      isLockedRef.current = true; // enter lock mode so user doesn't have to hold
+      isHoldingRef.current = false;
+      isLockedRef.current = true;
       setVoiceState("locked");
     }
-  }, [voiceState, openMic]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceState]);
 
   // ── TTS ───────────────────────────────────────────────────────────────────
 
@@ -270,61 +280,73 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
   useEffect(() => { closeMicRef.current = closeMicAndTranscribe; }, [closeMicAndTranscribe]);
   useEffect(() => { openMicRef.current = openMic; }, [openMic]);
 
+  const handleAltDown = useCallback(async () => {
+    // Locked → single tap stops + transcribes
+    if (isLockedRef.current) {
+      isLockedRef.current = false;
+      isHoldingRef.current = false;
+      if (pttTimerRef.current) { clearTimeout(pttTimerRef.current); pttTimerRef.current = null; }
+      pendingReleaseRef.current = false;
+      await closeMicRef.current();
+      return;
+    }
+    // Second tap while PTT-release timer is pending → lock mode
+    if (pendingReleaseRef.current && pttTimerRef.current !== null) {
+      clearTimeout(pttTimerRef.current);
+      pttTimerRef.current = null;
+      pendingReleaseRef.current = false;
+      isLockedRef.current = true;
+      isHoldingRef.current = false;
+      setVoiceState("locked");
+      return;
+    }
+    if (isHoldingRef.current) return;
+    isHoldingRef.current = true;
+    const ok = await openMicRef.current();
+    if (ok) setVoiceState("listening");
+  }, []); // stable
+
+  const handleAltUp = useCallback(() => {
+    if (!isHoldingRef.current || isLockedRef.current) return;
+    isHoldingRef.current = false;
+    pendingReleaseRef.current = true;
+    pttTimerRef.current = setTimeout(async () => {
+      pttTimerRef.current = null;
+      pendingReleaseRef.current = false;
+      if (!isLockedRef.current) await closeMicRef.current();
+    }, DOUBLE_TAP_MS);
+  }, []); // stable
+
+  // Local window keyboard events (side panel has focus)
   useEffect(() => {
-    const onKeyDown = async (e: KeyboardEvent) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Alt" || e.ctrlKey || e.metaKey || e.shiftKey || e.repeat) return;
       e.preventDefault();
-
-      // Locked → single tap stops + transcribes
-      if (isLockedRef.current) {
-        isLockedRef.current = false;
-        isHoldingRef.current = false;
-        if (pttTimerRef.current) { clearTimeout(pttTimerRef.current); pttTimerRef.current = null; }
-        pendingReleaseRef.current = false;
-        await closeMicRef.current();
-        return;
-      }
-
-      // Second tap while PTT-release timer is pending → lock mode
-      if (pendingReleaseRef.current && pttTimerRef.current !== null) {
-        clearTimeout(pttTimerRef.current);
-        pttTimerRef.current = null;
-        pendingReleaseRef.current = false;
-        isLockedRef.current = true;
-        isHoldingRef.current = false;
-        setVoiceState("locked");
-        return;
-      }
-
-      if (isHoldingRef.current) return;
-      isHoldingRef.current = true;
-      const ok = await openMicRef.current();
-      if (ok) setVoiceState("listening");
+      void handleAltDown();
     };
-
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key !== "Alt") return;
       e.preventDefault();
-      if (!isHoldingRef.current || isLockedRef.current) return;
-      isHoldingRef.current = false;
-      pendingReleaseRef.current = true;
-
-      pttTimerRef.current = setTimeout(async () => {
-        pttTimerRef.current = null;
-        pendingReleaseRef.current = false;
-        if (!isLockedRef.current) {
-          await closeMicRef.current();
-        }
-      }, DOUBLE_TAP_MS);
+      handleAltUp();
     };
-
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, []);
+  }, [handleAltDown, handleAltUp]);
+
+  // Relay from content script (page has focus → Alt pressed on the page)
+  useEffect(() => {
+    const onRuntimeMessage = (message: { type: string; event?: string }) => {
+      if (message.type !== "conjure:voice_hotkey") return;
+      if (message.event === "keydown") void handleAltDown();
+      else if (message.event === "keyup") handleAltUp();
+    };
+    chrome.runtime.onMessage.addListener(onRuntimeMessage);
+    return () => chrome.runtime.onMessage.removeListener(onRuntimeMessage);
+  }, [handleAltDown, handleAltUp]);
 
   // ── Initial permission check ──────────────────────────────────────────────
 

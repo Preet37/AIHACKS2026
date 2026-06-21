@@ -1139,7 +1139,7 @@ export default function App() {
             title={voiceState === "locked" ? "Tap to send voice" : voiceState !== "idle" ? voiceState : "Click to start voice · or hold Alt/Option"}
             className={`mic-button icon-button${voiceState !== "idle" ? " mic-active" : ""}${voiceState === "locked" ? " mic-locked" : ""}`}
             aria-label="Voice input"
-            onClick={voiceState === "locked" ? activateMic : voiceState === "idle" ? activateMic : undefined}
+            onClick={voiceState === "idle" || voiceState === "locked" ? () => void activateMic() : undefined}
           >
             {voiceState === "transcribing" ? (
               <Loader2 aria-hidden="true" className="spin" />
