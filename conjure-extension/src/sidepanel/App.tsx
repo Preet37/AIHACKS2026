@@ -18,6 +18,7 @@ import {
   XCircle
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import { VoiceOverlay } from "./VoiceOverlay";
 import { useVoice } from "./useVoice";
 import {
@@ -255,12 +256,13 @@ export default function App() {
   const socketRef = useRef<WebSocket | null>(null);
   const pendingOpenRef = useRef<Promise<WebSocket> | null>(null);
   const currentAssistantIdRef = useRef<string | null>(null);
+  // Accumulates streamed text outside React state so TTS can read it synchronously
+  const streamAccumRef = useRef<string>("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hydratedRef = useRef(false);
   const projectIdRef = useRef(projectId);
   // Tracks whether the current session was voice-initiated so we know to TTS the reply
   const voiceInitiatedRef = useRef(false);
-  const lastAssistantContentRef = useRef<string>("");
 
   useEffect(() => {
     projectIdRef.current = projectId;
@@ -364,6 +366,7 @@ export default function App() {
   }, []);
 
   const appendAssistantContent = useCallback((chunk: string) => {
+    streamAccumRef.current += chunk;
     setMessages((current) => {
       const assistantId = currentAssistantIdRef.current || makeId();
       currentAssistantIdRef.current = assistantId;
@@ -392,30 +395,46 @@ export default function App() {
 
   const finalizeAssistant = useCallback(
     (content?: string) => {
-      setMessages((current) => {
-        const updated = current.map((message) =>
+      // Grab the full streamed text NOW, synchronously, before any React batching
+      const fullText = content || streamAccumRef.current;
+      streamAccumRef.current = "";
+
+      setMessages((current) =>
+        current.map((message) =>
           message.id === currentAssistantIdRef.current
-            ? { ...message, content: content || message.content, streaming: false }
+            ? { ...message, content: fullText || message.content, streaming: false }
             : message
-        );
-        // Capture final text for TTS
-        const finalMsg = updated.find((m) => m.id === currentAssistantIdRef.current);
-        lastAssistantContentRef.current = finalMsg?.content ?? content ?? "";
-        return updated;
-      });
+        )
+      );
       currentAssistantIdRef.current = null;
       voiceInitiatedRef.current = false;
 
-      // Always speak the reply — Conjure is conversational.
-      // Strip markdown symbols and cap at ~400 chars so TTS stays snappy.
-      const raw = lastAssistantContentRef.current;
-      if (raw) {
-        const cleaned = raw
-          .replace(/\*\*Plan:\*\*[\s\S]*/, "") // skip plan blocks
-          .replace(/[*_`#>]/g, "")
-          .replace(/\n+/g, " ")
-          .trim();
-        if (cleaned) void speakText(cleaned.slice(0, 400));
+      if (!fullText) return;
+
+      // ── Build a short spoken summary (1-2 sentences, ≤ 160 chars) ────────────
+      const forTTS = fullText
+        .replace(/\*\*Plan:\*\*[\s\S]*/, "")  // skip plan blocks
+        .replace(/```[\s\S]*?```/g, "")         // skip code blocks
+        .replace(/`[^`]+`/g, "")               // inline code
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // links → label
+        .replace(/[*_#>]/g, "")
+        .replace(/\n+/g, " ")
+        .trim();
+
+      // Extract first 1-2 sentences
+      const sentenceEnd = /[.!?]/g;
+      let spoken = forTTS;
+      let match: RegExpExecArray | null;
+      let count = 0;
+      while ((match = sentenceEnd.exec(forTTS)) !== null) {
+        count++;
+        if (count >= 2) { spoken = forTTS.slice(0, match.index + 1); break; }
+      }
+      spoken = spoken.slice(0, 160).trim();
+
+      if (spoken) {
+        const endsWithQuestion = /\?\s*$/.test(spoken);
+        void speakText(spoken, { autoListen: endsWithQuestion });
       }
     },
     [speakText]
@@ -775,6 +794,7 @@ export default function App() {
   const submitChat = useCallback(
     async (query: string, modId?: string) => {
       currentAssistantIdRef.current = null;
+      streamAccumRef.current = "";
       setPlanSteps([]);
       setPlanAwaitingApproval(false);
       setMessages((current) => [
@@ -935,7 +955,13 @@ export default function App() {
               <time>{formatTime(message.createdAt)}</time>
               {message.streaming ? <Loader2 aria-hidden="true" className="spin small" /> : null}
             </div>
-            <p>{message.content}</p>
+            {message.role === "assistant" ? (
+              <div className="message-body">
+                <ReactMarkdown>{message.content}</ReactMarkdown>
+              </div>
+            ) : (
+              <p className="message-body">{message.content}</p>
+            )}
           </article>
         ))}
         <div ref={messagesEndRef} />

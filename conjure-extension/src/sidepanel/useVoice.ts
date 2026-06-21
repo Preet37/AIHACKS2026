@@ -21,7 +21,7 @@ export interface UseVoiceReturn {
   barAmplitudes: number[];
   permissionState: PermissionState | null;
   activateMic: () => Promise<void>;
-  speakText: (text: string) => Promise<void>;
+  speakText: (text: string, opts?: { autoListen?: boolean }) => Promise<void>;
 }
 
 export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
@@ -139,7 +139,7 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
   }, []);
 
   // ── TTS ───────────────────────────────────────────────────────────────────
-  const speakText = useCallback(async (text: string) => {
+  const speakText = useCallback(async (text: string, opts?: { autoListen?: boolean }) => {
     if (!text.trim()) return;
     setVoiceState("speaking");
     try {
@@ -161,6 +161,10 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
       console.error("[voice] TTS error:", err);
     } finally {
       setVoiceState("idle");
+    }
+    // If LLM ended with a question, automatically open the mic for the reply
+    if (opts?.autoListen && !isRecordingRef.current) {
+      await activateMicRef.current();
     }
   }, []);
 
