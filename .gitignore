@@ -1,0 +1,51 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+.sentryclirc
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+htmlcov/
+.coverage
+coverage.xml
+
+# Node / extension
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dist/
+build/
+.vite/
+
+# Generated extension projects and sandbox artifacts
+demo_code/
+*.crx
+*.zip
+artifacts/
+screenshots/
+
+# Test output
+coverage/
+playwright-report/
+test-results/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+MASTER_DESIGN_DOC.md
