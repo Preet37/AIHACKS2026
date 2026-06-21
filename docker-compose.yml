@@ -1,0 +1,24 @@
+# Local Redis for conjure: datastore + sandbox cache + job streams.
+# Reproducible on any machine with Docker Desktop:
+#   docker compose up -d        # start Redis on localhost:6379
+#   docker compose ps           # check status
+#   docker compose down         # stop (data persists in the named volume)
+#   docker compose down -v      # stop AND wipe data
+services:
+  redis:
+    image: redis:7-alpine          # pinned so every machine runs the same Redis
+    container_name: conjure-redis
+    ports:
+      - "6379:6379"                # matches REDIS_URL=redis://localhost:6379/0
+    command: ["redis-server", "--appendonly", "yes"]   # persist to disk
+    volumes:
+      - conjure-redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  conjure-redis-data:

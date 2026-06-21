@@ -29,6 +29,7 @@ class ConjureAgent:
         conversation_id: str,
         active_tabs: Sequence[Mapping[str, Any]] | None,
         pending_tab_requests: dict[str, asyncio.Future[Any]],
+        history: Sequence[Mapping[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         async def collect() -> list[dict[str, Any]]:
             return [
@@ -39,6 +40,7 @@ class ConjureAgent:
                     conversation_id=conversation_id,
                     active_tabs=active_tabs,
                     pending_tab_requests=pending_tab_requests,
+                    history=history,
                 )
             ]
 
@@ -53,6 +55,7 @@ class ConjureAgent:
         active_tabs: Sequence[Mapping[str, Any]] | None,
         pending_tab_requests: dict[str, asyncio.Future[Any]],
         rules: Sequence[str] | None = None,
+        history: Sequence[Mapping[str, Any]] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         project_dir = project_dir_for(self.settings, project_id)
         outbound: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -77,6 +80,7 @@ class ConjureAgent:
                 project_id=project_id,
                 active_tabs=active_tabs or [],
                 rules=rules or [],
+                history=history or [],
                 outbound=outbound,
             ):
                 yield event
@@ -123,11 +127,17 @@ class ConjureAgent:
         project_id: str,
         active_tabs: Sequence[Mapping[str, Any]],
         rules: Sequence[str],
+        history: Sequence[Mapping[str, Any]],
         outbound: asyncio.Queue[dict[str, Any]],
     ) -> AsyncIterator[dict[str, Any]]:
         try:
             from langchain.chat_models import init_chat_model
-            from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+            from langchain_core.messages import (
+                AIMessage,
+                HumanMessage,
+                SystemMessage,
+                ToolMessage,
+            )
         except ImportError as exc:
             raise RuntimeError(
                 "LangChain dependencies are not installed. Set CONJURE_DEMO_MODE=true or install langchain and langchain-anthropic."
@@ -145,9 +155,18 @@ class ConjureAgent:
                     active_tabs=active_tabs,
                     rules=rules,
                 )
-            ),
-            HumanMessage(content=query),
+            )
         ]
+        for item in history:
+            role = str(item.get("role", "")).lower()
+            text = str(item.get("content", ""))
+            if not text:
+                continue
+            if role == "assistant":
+                messages.append(AIMessage(content=text))
+            else:
+                messages.append(HumanMessage(content=text))
+        messages.append(HumanMessage(content=query))
 
         for _ in range(8):
             full = None

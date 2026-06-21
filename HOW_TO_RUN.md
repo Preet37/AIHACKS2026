@@ -104,9 +104,87 @@ SIMULAR_API_KEY=
 SENTRY_DSN=
 ```
 
-Redis is optional for first local testing because the generated store includes an in-memory fallback. For the intended full build, run Redis at:
+Redis is optional for first local testing because the store includes an in-memory fallback. For the intended full build (persistent conversations, sandbox cache, job streams), run Redis at:
 
 ```env
 REDIS_URL=redis://localhost:6379/0
 ```
+
+## 9. Run Redis With Docker (recommended, reproducible)
+
+The repo ships a `docker-compose.yml` pinned to `redis:7-alpine` with disk
+persistence. This is the easiest way for everyone on the team to run an
+identical Redis — the setup lives in the repo, so there is nothing to configure
+per machine beyond installing Docker once.
+
+### First-time setup (each machine, including your teammate's)
+
+1. Install Docker Desktop (Windows):
+
+   ```powershell
+   winget install Docker.DockerDesktop
+   ```
+
+   Launch Docker Desktop once and let it finish first-run setup (it uses WSL2).
+   A sign-out/in (or reboot) puts the `docker` CLI on your PATH permanently.
+
+2. From the repo root, start Redis:
+
+   ```powershell
+   docker compose up -d
+   docker compose ps        # conjure-redis should be "healthy"
+   ```
+
+3. Verify it responds:
+
+   ```powershell
+   docker exec conjure-redis redis-cli ping     # -> PONG
+   ```
+
+`.env` already points at it (`REDIS_URL=redis://localhost:6379/0`), so no
+further config is needed.
+
+### Your teammate's steps (later)
+
+Same three commands after they `git pull` — the committed `docker-compose.yml`
+gives them a byte-identical Redis:
+
+```powershell
+winget install Docker.DockerDesktop   # one time
+docker compose up -d
+docker exec conjure-redis redis-cli ping
+```
+
+### Confirm the backend actually connects
+
+With the venv active and Redis up, temporarily disable the in-memory fallback so
+a bad connection can't hide:
+
+```powershell
+$env:CONJURE_REDIS_FALLBACK="false"
+python -c "import asyncio; from backend.utils.store import create_store; print(type(asyncio.run(create_store())).__name__)"
+```
+
+- `RedisStore` -> connected to the Docker container.
+- `InMemoryStore` or a `ConnectionError` -> not connected (check `docker compose ps`).
+
+Conversations, messages, and agent memory now persist in Redis across backend
+restarts. Inspect them with:
+
+```powershell
+docker exec conjure-redis redis-cli keys '*'
+```
+
+### Everyday Docker commands
+
+| Command | Effect |
+| --- | --- |
+| `docker compose up -d` | start Redis in the background |
+| `docker compose ps` | show status/health |
+| `docker compose down` | stop Redis (data is kept in the volume) |
+| `docker compose down -v` | stop Redis and wipe all data |
+
+> PATH note: in a brand-new terminal before your next sign-in, if `docker`
+> errors with `docker-credential-desktop ... not found`, run once:
+> `$env:PATH = "$env:ProgramFiles\Docker\Docker\resources\bin;$env:PATH"`.
 
