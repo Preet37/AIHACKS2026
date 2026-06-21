@@ -10,6 +10,10 @@ import {
   CONJURE_CONFIG
 } from "../shared/config";
 import {
+  DEFAULT_FALLBACK_HOTKEY,
+  FALLBACK_HOTKEY_STORAGE_KEY
+} from "../shared/keybind";
+import {
   BACKGROUND_MESSAGE,
   CLIENT_EVENT,
   CONTENT_MESSAGE,
@@ -17,12 +21,15 @@ import {
   type ActiveTabSnapshot,
   type ApplyModsResult,
   type ClientToServerEvent,
+  type CommandShortcutInfo,
+  type ConsoleLevel,
   type ConsoleLogEntry,
   type GeneratedBundle,
   type GetElementHtmlMessage,
   type GetPageContentMessage,
   type ModRecord,
   type PageContentResult,
+  type RuntimeRequest,
   type RuntimeResult,
   type ServerToClientEvent
 } from "../shared/messages";
@@ -41,10 +48,8 @@ import {
   type TraceStatus,
   type UiSettings
 } from "./surfaceContext";
-import { LeftStage } from "./surfaces/LeftStage";
 import { RightPanel } from "./surfaces/RightPanel";
 import { Composer } from "./surfaces/Composer";
-import { CommandPalette } from "./surfaces/CommandPalette";
 
 const SESSION_STORAGE_KEY = "conjure.session";
 
@@ -64,11 +69,10 @@ interface ToolRun {
 }
 
 // Workspace blocks for the StatusBar — the [n] index is added by the primitive.
-const panelModes: Array<{ id: PanelMode; label: string }> = [
+const panelModes: Array<{ id: string; label: string }> = [
   { id: "home", label: "home" },
-  { id: "planning", label: "plan" },
   { id: "design", label: "design" },
-  { id: "trace", label: "trace" },
+  { id: "trace", label: "track" },
   { id: "settings", label: "settings" }
 ];
 
@@ -118,7 +122,24 @@ const captureException = (error: unknown) => {
   }
 };
 
-const getChromeApi = () => (typeof chrome === "undefined" ? undefined : chrome);
+const getChromeApi = () => {
+  try {
+    if (typeof chrome === "undefined" || !chrome.runtime?.id) return undefined;
+    return chrome;
+  } catch {
+    return undefined;
+  }
+};
+
+const safeRuntimeMessage = async <T,>(message: RuntimeRequest): Promise<RuntimeResult<T> | undefined> => {
+  const chromeApi = getChromeApi();
+  if (!chromeApi?.runtime?.sendMessage) return undefined;
+  try {
+    return (await chromeApi.runtime.sendMessage(message)) as RuntimeResult<T>;
+  } catch {
+    return undefined;
+  }
+};
 
 const previewTabSnapshot = (): ActiveTabSnapshot[] => [
   {
@@ -150,6 +171,17 @@ const readNumber = (record: Record<string, unknown>, ...keys: string[]) => {
     if (typeof value === "string" && value.trim()) return Number(value);
   }
   return undefined;
+};
+
+const readConsoleLevel = (record: Record<string, unknown>): ConsoleLevel | undefined => {
+  const level = readString(record, "level");
+  return level === "debug" ||
+    level === "info" ||
+    level === "log" ||
+    level === "warn" ||
+    level === "error"
+    ? level
+    : undefined;
 };
 
 const fallbackPageScript = (includeHtml: boolean, maxChars: number): PageContentResult => {
@@ -254,6 +286,8 @@ export default function App() {
     voiceAlwaysListening: false,
     workMode: "planning"
   });
+  const [commandShortcuts, setCommandShortcuts] = useState<CommandShortcutInfo[]>([]);
+  const [fallbackHotkey, setFallbackHotkeyState] = useState(DEFAULT_FALLBACK_HOTKEY);
 
   const socketRef = useRef<WebSocket | null>(null);
   const pendingOpenRef = useRef<Promise<WebSocket> | null>(null);
@@ -267,7 +301,7 @@ export default function App() {
   const handleVoiceTranscript = useCallback((text: string) => {
     void submitChatRef.current?.(text);
   }, []);
-  const { voiceState, voiceError, activateMic, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
+  const { voiceState, voiceError, barAmplitudes, activateMic, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
 
   useEffect(() => {
     projectIdRef.current = projectId;
@@ -279,6 +313,83 @@ export default function App() {
       { id: makeId(), role: "system", content, createdAt: Date.now() }
     ]);
   }, []);
+
+  const openDesignTab = useCallback(async () => {
+    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.OPEN_DESIGN_TAB });
+  }, []);
+
+  const openTraceTab = useCallback(async () => {
+    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.OPEN_TRACE_TAB });
+  }, []);
+
+  const openSettingsTab = useCallback(async () => {
+    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.OPEN_SETTINGS_TAB });
+  }, []);
+
+  const requestCommandBar = useCallback(async () => {
+    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.TOGGLE_COMMAND_BAR });
+  }, []);
+
+  const refreshCommandShortcuts = useCallback(async () => {
+    const response = await safeRuntimeMessage<CommandShortcutInfo[]>({
+      type: BACKGROUND_MESSAGE.GET_COMMAND_SHORTCUTS
+    });
+    if (isRuntimeOk(response)) setCommandShortcuts(response.data);
+  }, []);
+
+  const openShortcutSettings = useCallback(async () => {
+    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.OPEN_SHORTCUT_SETTINGS });
+  }, []);
+
+  const testCommandOverlay = useCallback(() => {
+    void requestCommandBar();
+  }, [requestCommandBar]);
+
+  const setFallbackHotkey = useCallback((value: string) => {
+    setFallbackHotkeyState(value);
+    const chromeApi = getChromeApi();
+    if (chromeApi?.storage?.local) {
+      chromeApi.storage.local.set({ [FALLBACK_HOTKEY_STORAGE_KEY]: value }).catch(captureException);
+    }
+  }, []);
+
+  const setRoutedMode = useCallback(
+    (nextMode: PanelMode) => {
+      if (nextMode === "design") {
+        void openDesignTab();
+        return;
+      }
+      if (nextMode === "trace") {
+        void openTraceTab();
+        return;
+      }
+      if (nextMode === "settings") {
+        void openSettingsTab();
+        return;
+      }
+      setMode(nextMode);
+    },
+    [openDesignTab, openSettingsTab, openTraceTab]
+  );
+
+  const selectWorkspace = useCallback(
+    (workspaceId: string) => {
+      if (workspaceId === "design") {
+        void openDesignTab();
+        return;
+      }
+      if (workspaceId === "trace") {
+        void openTraceTab();
+        return;
+      }
+      if (workspaceId === "settings") {
+        void openSettingsTab();
+        return;
+      }
+      setMode("home");
+    },
+    [openDesignTab, openSettingsTab, openTraceTab]
+  );
 
   const appendTrace = useCallback((entry: Omit<TraceEntry, "id" | "timestamp">) => {
     setTraceEntries((current) =>
@@ -312,7 +423,7 @@ export default function App() {
       }
       setStatusText("Applying mods to browser");
       try {
-        const response = await chromeApi.runtime.sendMessage({
+        const response = await safeRuntimeMessage<ApplyModsResult>({
           type: BACKGROUND_MESSAGE.APPLY_MODS,
           projectId: projectIdRef.current,
           bundles
@@ -369,10 +480,7 @@ export default function App() {
         }
         const data = (await response.json()) as { mods?: ModRecord[] };
         setMods(data.mods || []);
-        const chromeApi = getChromeApi();
-        if (chromeApi?.runtime?.sendMessage) {
-          await chromeApi.runtime.sendMessage({ type: BACKGROUND_MESSAGE.REMOVE_MOD, modId: mod.id });
-        }
+        await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.REMOVE_MOD, modId: mod.id });
         setStatusText(`Removed "${mod.name}"`);
         addSystemMessage(`Removed mod "${mod.name}".`);
       } catch (error) {
@@ -469,7 +577,7 @@ export default function App() {
       return previewTabs;
     }
 
-    const response = await chromeApi.runtime.sendMessage({
+    const response = await safeRuntimeMessage<ActiveTabSnapshot[]>({
       type: BACKGROUND_MESSAGE.GET_ACTIVE_TABS
     });
 
@@ -512,23 +620,23 @@ export default function App() {
 
       try {
         if (selector) {
-          const response = await chromeApi.tabs.sendMessage(tabId, {
+          const response = (await chromeApi.tabs.sendMessage(tabId, {
             type: CONTENT_MESSAGE.GET_ELEMENT_HTML,
             requestId,
             selector,
             maxChars: CONJURE_CONFIG.pageContentMaxChars
-          } satisfies GetElementHtmlMessage);
+          } satisfies GetElementHtmlMessage)) as RuntimeResult<PageContentResult>;
 
           if (isRuntimeOk<PageContentResult>(response)) return response.data;
           throw new Error(response?.error || "Content script could not read the selected element.");
         }
 
-        const response = await chromeApi.tabs.sendMessage(tabId, {
+        const response = (await chromeApi.tabs.sendMessage(tabId, {
           type: CONTENT_MESSAGE.GET_PAGE_CONTENT,
           requestId,
           includeHtml,
           maxChars: CONJURE_CONFIG.pageContentMaxChars
-        } satisfies GetPageContentMessage);
+        } satisfies GetPageContentMessage)) as RuntimeResult<PageContentResult>;
 
         if (isRuntimeOk<PageContentResult>(response)) return response.data;
         throw new Error(response?.error || "Content script could not read the page.");
@@ -588,10 +696,10 @@ export default function App() {
           return;
         }
 
-        const response = await chromeApi.runtime.sendMessage({
+        const response = await safeRuntimeMessage<ConsoleLogEntry[]>({
           type: BACKGROUND_MESSAGE.GET_CONSOLE_LOGS,
           tabId,
-          level: readString(event, "level"),
+          level: readConsoleLevel(event),
           since: readNumber(event, "since"),
           limit: 300
         });
@@ -695,7 +803,7 @@ export default function App() {
             modId: readString(raw, "mod_id", "modId"),
             targetUrl: readString(raw, "target_url", "targetUrl")
           });
-          setMode("trace");
+          void openTraceTab();
           setStatusText("Sandbox running");
           return;
         case SERVER_EVENT.SANDBOX_SCREENSHOT:
@@ -789,7 +897,8 @@ export default function App() {
       applyModBundles,
       finalizeAssistant,
       handleRequestConsoleLogs,
-      handleRequestTabContent
+      handleRequestTabContent,
+      openTraceTab
     ]
   );
 
@@ -899,6 +1008,14 @@ export default function App() {
     const query = input.trim();
     if (!query) return;
     setInput("");
+    if (uiSettings.workMode === "planning") {
+      setMode("planning");
+      setMessages((current) => [
+        ...current,
+        { id: makeId(), role: "user", content: query, createdAt: Date.now() }
+      ]);
+      return;
+    }
     await submitChat(query);
   };
 
@@ -906,6 +1023,14 @@ export default function App() {
     const command = query.trim();
     if (!command) return;
     setInput("");
+    if (uiSettings.workMode === "planning") {
+      setMode("planning");
+      setMessages((current) => [
+        ...current,
+        { id: makeId(), role: "user", content: command, createdAt: Date.now() }
+      ]);
+      return;
+    }
     await submitChat(command);
   };
 
@@ -1002,13 +1127,24 @@ export default function App() {
 
   useEffect(() => {
     void getActiveTabs();
-    const chromeApi = getChromeApi();
-    if (chromeApi?.runtime?.sendMessage) {
-      chromeApi.runtime
-        .sendMessage({ type: BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE })
-        .catch(captureException);
-    }
+    void safeRuntimeMessage({ type: BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE });
   }, [getActiveTabs]);
+
+  useEffect(() => {
+    const chromeApi = getChromeApi();
+    if (!chromeApi?.storage?.local) return;
+    chromeApi.storage.local
+      .get(FALLBACK_HOTKEY_STORAGE_KEY)
+      .then((stored) => {
+        const value = stored[FALLBACK_HOTKEY_STORAGE_KEY];
+        setFallbackHotkeyState(typeof value === "string" ? value : DEFAULT_FALLBACK_HOTKEY);
+      })
+      .catch(captureException);
+  }, []);
+
+  useEffect(() => {
+    void refreshCommandShortcuts();
+  }, [refreshCommandShortcuts]);
 
   // Load the mod list and (re)apply every active mod whenever the project changes.
   useEffect(() => {
@@ -1023,7 +1159,7 @@ export default function App() {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setShowCommand((current) => !current);
+        void requestCommandBar();
         return;
       }
 
@@ -1037,14 +1173,14 @@ export default function App() {
         const selectedMode = panelModes[modeIndex]?.id;
         if (selectedMode) {
           event.preventDefault();
-          setMode(selectedMode);
+          selectWorkspace(selectedMode);
         }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [requestCommandBar, selectWorkspace]);
 
   useEffect(
     () => () => {
@@ -1109,7 +1245,7 @@ export default function App() {
 
   const surfaceValue: SurfaceContextValue = {
     mode,
-    setMode,
+    setMode: setRoutedMode,
     mods,
     activeMods,
     refreshAndApplyMods,
@@ -1149,14 +1285,24 @@ export default function App() {
     toggleUiSetting,
     setUiSettings,
     rules,
+    commandShortcuts,
+    fallbackHotkey,
+    setFallbackHotkey,
+    refreshCommandShortcuts,
+    openShortcutSettings,
+    testCommandOverlay,
     input,
     setInput,
     handleSubmit,
     showCommand,
-    setShowCommand,
+    setShowCommand: (value: boolean) => {
+      if (value) void requestCommandBar();
+      else setShowCommand(false);
+    },
     handleCommandSubmit,
     voiceState,
     voiceError,
+    barAmplitudes,
     activateMic
   };
 
@@ -1166,14 +1312,12 @@ export default function App() {
   return (
     <SurfaceProvider value={surfaceValue}>
       <main className={`conjure-shell mode-${mode}`}>
-        <LeftStage />
-
         <aside className="conjure-panel" aria-label="Conjure command interface">
           <StatusBar
             workspaces={panelModes}
-            activeId={mode}
-            onSelect={(id) => setMode(id as PanelMode)}
-            onBrand={() => setShowCommand(true)}
+            activeId="home"
+            onSelect={selectWorkspace}
+            onBrand={() => void requestCommandBar()}
             right={
               <>
                 <StatusBlock
@@ -1190,8 +1334,6 @@ export default function App() {
 
           <Composer />
         </aside>
-
-        {showCommand ? <CommandPalette /> : null}
       </main>
     </SurfaceProvider>
   );

@@ -42,47 +42,41 @@ export function DesignPanel() {
           {/* grounds + surfaces */}
           <button
             type="button"
-            className="ds-swatch"
+            className="ds-swatch ds-swatch--ground"
             title="Ground"
             aria-label="Ground"
-            style={{ background: "var(--cj-ground)" }}
           />
           <button
             type="button"
-            className="ds-swatch"
+            className="ds-swatch ds-swatch--surface"
             title="Surface"
             aria-label="Surface"
-            style={{ background: "var(--cj-surface)" }}
           />
           <button
             type="button"
-            className="ds-swatch"
+            className="ds-swatch ds-swatch--surface-2"
             title="Surface 2"
             aria-label="Surface 2"
-            style={{ background: "var(--cj-surface-2)" }}
           />
           {/* text + dim */}
           <button
             type="button"
-            className="ds-swatch"
+            className="ds-swatch ds-swatch--dim"
             title="Dim"
             aria-label="Dim"
-            style={{ background: "var(--cj-dim)" }}
           />
           <button
             type="button"
-            className="ds-swatch"
+            className="ds-swatch ds-swatch--text"
             title="Text"
             aria-label="Text"
-            style={{ background: "var(--cj-text)" }}
           />
           {/* accent — selected */}
           <button
             type="button"
-            className="ds-swatch ds-swatch--selected"
+            className="ds-swatch ds-swatch--accent ds-swatch--selected"
             title="Accent"
             aria-label="Accent (selected)"
-            style={{ background: "var(--cj-accent)" }}
           />
         </div>
       </div>
@@ -95,10 +89,10 @@ export function DesignPanel() {
           role="presentation"
           aria-label="Padding 24 px"
         >
-          <span style={{ color: "var(--cj-faint)", fontSize: "var(--cj-fs-micro)" }}>0</span>
+          <span className="ds-slider-zero">0</span>
           <div className="ds-slider-track" aria-hidden="true">
-            <span className="ds-slider-fill" style={{ width: "42%" }} />
-            <span className="ds-slider-thumb" style={{ left: "calc(42% - 3px)" }} />
+            <span className="ds-slider-fill ds-slider-fill--padding" />
+            <span className="ds-slider-thumb ds-slider-thumb--padding" />
           </div>
           <span>24 px</span>
         </div>
@@ -110,7 +104,7 @@ export function DesignPanel() {
         <Button
           variant="primary"
           onClick={() => setMode("trace")}
-          style={{ justifyContent: "flex-start" }}
+          className="ds-run-agent"
         >
           {`> run agent: ${providerLabel.toLowerCase()}`}
         </Button>

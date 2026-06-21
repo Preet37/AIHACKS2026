@@ -1,6 +1,3 @@
-// Manage — Home side panel (§7). Composes §6 primitives:
-// Pane `MODS` → Window `RUNS` → Pane `CONVERSATION`.
-// All status indicators use StatusBlock (■/□); no lucide circle/spinner icons.
 import { ExternalLink, Pencil, RefreshCcw, Trash2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { Button, Pane, StatusBlock, Window } from "../components";
@@ -21,64 +18,63 @@ export function HomePanel() {
     agentStatusClass,
     setMode,
     pullRequestLinks,
+    activeMods,
+    traceEntries,
     messages,
     messagesEndRef
   } = useSurface();
 
-  // Derive run StatusBlock state from agentStatusClass / agentRun
   const runState = agentRun.active
     ? "active"
     : agentStatusClass === "passed" || agentStatusClass === "failed"
       ? "done"
       : "pending";
-
-  // "failed" run shows dim text; no new hue — §3 forbids red/green
   const runPhraseClass = agentStatusClass === "failed" ? "hp-run-dim" : "hp-run-phrase";
 
   return (
     <div className="hp-stack">
-      {/* ── MODS pane ──────────────────────────────────────────────────── */}
       <Pane
         name="MODS"
         ariaLabel="Mods"
         bodyClassName="hp-mods-body"
         headerRight={
-          <Button
-            variant="ghost"
-            title="Refresh and re-apply mods"
-            onClick={() => void refreshAndApplyMods(projectId)}
-          >
-            <RefreshCcw aria-hidden="true" />
-          </Button>
+          <span className="hp-pane-count">
+            {mods.length} / {activeMods.length} active
+            <Button
+              variant="ghost"
+              title="Refresh and re-apply mods"
+              onClick={() => void refreshAndApplyMods(projectId)}
+            >
+              <RefreshCcw aria-hidden="true" />
+            </Button>
+          </span>
         }
       >
         {mods.length === 0 ? (
-          <p className="hp-empty">No mods yet. Ask Conjure to build one.</p>
+          <div className="hp-empty">
+            <span className="hp-empty__mark">workspace</span>
+            <span>No mods yet. Press cmd K to build one.</span>
+          </div>
         ) : (
-          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+          <ul className="hp-mod-list">
             {mods.map((mod) => {
               const verified = mod.last_verified;
               const verdict = verified?.passed ? "verified" : verified ? "failed" : "unverified";
-              // Active mod = accent ■; inactive mod = dim ■ (§4)
               const modState = mod.status === "active" ? "active" : "done";
 
               return (
                 <li key={mod.id} className="hp-mod-row">
-                  {/* Row header: status ■ + name + verdict */}
                   <div className="hp-mod-head">
                     <StatusBlock
                       state={modState}
                       label={mod.status === "active" ? "active" : "inactive"}
                     />
                     <span className="hp-mod-name">{mod.name}</span>
-                    {/* verdict dim text — "failed" stays dim, never red (§3) */}
                     <span className="hp-mod-verdict">{verdict}</span>
                   </div>
 
-                  {/* Prompt */}
                   <p className="hp-mod-prompt">{mod.prompt}</p>
 
-                  {/* Sandbox replay link */}
                   {verified?.replay_url ? (
                     <a className="hp-mod-link" href={verified.replay_url} target="_blank" rel="noreferrer">
                       <ExternalLink aria-hidden="true" />
@@ -86,7 +82,6 @@ export function HomePanel() {
                     </a>
                   ) : null}
 
-                  {/* Inline edit form or action buttons */}
                   {editingMod && editingMod.id === mod.id ? (
                     <form className="hp-mod-edit" onSubmit={submitModChange}>
                       <textarea
@@ -110,11 +105,7 @@ export function HomePanel() {
                       >
                         <Pencil aria-hidden="true" /> Change
                       </Button>
-                      <Button
-                        variant="ghost"
-                        title="Remove this mod"
-                        onClick={() => void removeMod(mod)}
-                      >
+                      <Button variant="ghost" title="Remove this mod" onClick={() => void removeMod(mod)}>
                         <Trash2 aria-hidden="true" /> Remove
                       </Button>
                     </div>
@@ -126,8 +117,6 @@ export function HomePanel() {
         )}
       </Pane>
 
-      {/* ── RUNS window ────────────────────────────────────────────────── */}
-      {/* Window is active (accent bar) when a run is in progress (§6) */}
       <Window
         title="RUNS"
         active={agentRun.active}
@@ -136,27 +125,32 @@ export function HomePanel() {
           <StatusBlock
             state={runState}
             pulse={agentRun.active}
-            label={agentRun.active ? "running" : agentStatusClass === "passed" ? "passed" : agentStatusClass === "failed" ? "failed" : "idle"}
+            label={
+              agentRun.active
+                ? "running"
+                : agentStatusClass === "passed"
+                  ? "passed"
+                  : agentStatusClass === "failed"
+                    ? "failed"
+                    : "idle"
+            }
           />
         }
         barRight={
-          <Button
-            variant="ghost"
-            title="Open trace"
-            onClick={() => setMode("trace")}
-          >
-            trace ↗
-          </Button>
+          <span className="hp-pane-count">
+            {agentRun.active ? "1 active" : "0 active"}
+            <Button variant="ghost" title="Open trace" onClick={() => setMode("trace")}>
+              track
+            </Button>
+          </span>
         }
       >
         <div className="hp-run-body">
-          {/* Status ■ + phrase — "failed" phrase is dim text, not red (§3) */}
           <div className="hp-run-status">
             <StatusBlock state={runState} pulse={agentRun.active} />
             <span className={runPhraseClass}>{agentRun.phrase}</span>
           </div>
 
-          {/* Session replay link */}
           {agentRun.sessionUrl ? (
             <a className="hp-run-link" href={agentRun.sessionUrl} target="_blank" rel="noreferrer">
               <ExternalLink aria-hidden="true" />
@@ -164,7 +158,6 @@ export function HomePanel() {
             </a>
           ) : null}
 
-          {/* PR links */}
           {pullRequestLinks.length > 0 ? (
             <ol className="hp-pr-list">
               {pullRequestLinks.map((url, index) => (
@@ -177,6 +170,22 @@ export function HomePanel() {
               ))}
             </ol>
           ) : null}
+
+          <ol className="hp-step-log" aria-label="Run steps">
+            {(traceEntries.length ? traceEntries : [
+              { id: "idle-1", label: "waiting for prompt", status: "pending" as const },
+              { id: "idle-2", label: "agent idle", status: "pending" as const }
+            ]).slice(0, 4).map((entry, index) => (
+              <li key={entry.id} className="hp-step">
+                <StatusBlock
+                  state={entry.status === "running" ? "active" : entry.status === "done" ? "done" : "pending"}
+                  pulse={entry.status === "running"}
+                />
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <span>{entry.label}</span>
+              </li>
+            ))}
+          </ol>
         </div>
       </Window>
 

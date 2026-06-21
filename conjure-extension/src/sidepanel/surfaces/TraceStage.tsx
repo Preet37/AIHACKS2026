@@ -2,7 +2,7 @@
 // step log (StatusBlock per step, dim text for failed) + ProgressBar footer.
 // Composes §6 primitives only. No hardcoded hex, no border-radius, no red.
 import "./Trace.css";
-import { StatusBlock, ProgressBar } from "../components";
+import { Button, StatusBlock, ProgressBar } from "../components";
 import { traceStatusState } from "../lib/format";
 import { useSurface } from "../surfaceContext";
 
@@ -60,6 +60,9 @@ export function TraceStage() {
             label={`Agent: ${label}`}
           />
           {agentRun.active ? "running" : label}
+          <Button variant="ghost" type="button" disabled={!agentRun.active}>
+            [ stop ]
+          </Button>
         </span>
       </header>
 

@@ -5,7 +5,9 @@ export const CONTENT_MESSAGE = {
   GET_ELEMENT_HTML: "conjure:get_element_html",
   VISUAL_EDIT_SELECTION: "conjure:visual_edit_selection",
   VISUAL_EDIT_PREVIEW: "conjure:visual_edit_preview",
-  VISUAL_EDIT_COMMIT: "conjure:visual_edit_commit"
+  VISUAL_EDIT_COMMIT: "conjure:visual_edit_commit",
+  TOGGLE_COMMAND_BAR: "conjure:toggle_command_bar",
+  VOICE_HOTKEY: "conjure:voice_hotkey"
 } as const;
 
 export const PAGE_HOOK_SOURCE = "conjure-page-hook" as const;
@@ -20,7 +22,15 @@ export const BACKGROUND_MESSAGE = {
   STOP_VISUAL_EDIT: "conjure:stop_visual_edit",
   APPLY_VISUAL_EDIT: "conjure:apply_visual_edit",
   COMMIT_VISUAL_EDITS: "conjure:commit_visual_edits",
-  DISCARD_VISUAL_EDITS: "conjure:discard_visual_edits"
+  DISCARD_VISUAL_EDITS: "conjure:discard_visual_edits",
+  OPEN_DESIGN_TAB: "conjure:open_design_tab",
+  OPEN_TRACE_TAB: "conjure:open_trace_tab",
+  OPEN_SETTINGS_TAB: "conjure:open_settings_tab",
+  GET_COMMAND_SHORTCUTS: "conjure:get_command_shortcuts",
+  OPEN_SHORTCUT_SETTINGS: "conjure:open_shortcut_settings",
+  TOGGLE_COMMAND_BAR: "conjure:toggle_command_bar",
+  VOICE_START: "conjure:voice_start",
+  VOICE_STOP: "conjure:voice_stop"
 } as const;
 
 export const CLIENT_EVENT = {
@@ -254,6 +264,16 @@ export interface GetElementHtmlMessage {
   maxChars?: number;
 }
 
+export interface ToggleCommandBarContentMessage {
+  type: typeof CONTENT_MESSAGE.TOGGLE_COMMAND_BAR;
+}
+
+export interface CommandShortcutInfo {
+  name: string;
+  description?: string;
+  shortcut?: string;
+}
+
 export interface GetActiveTabsMessage {
   type: typeof BACKGROUND_MESSAGE.GET_ACTIVE_TABS;
 }
@@ -364,6 +384,45 @@ export interface VisualEditCommitMessage {
   };
 }
 
+export interface OpenDesignTabMessage {
+  type: typeof BACKGROUND_MESSAGE.OPEN_DESIGN_TAB;
+}
+
+export interface OpenTraceTabMessage {
+  type: typeof BACKGROUND_MESSAGE.OPEN_TRACE_TAB;
+}
+
+export interface OpenSettingsTabMessage {
+  type: typeof BACKGROUND_MESSAGE.OPEN_SETTINGS_TAB;
+}
+
+export interface GetCommandShortcutsMessage {
+  type: typeof BACKGROUND_MESSAGE.GET_COMMAND_SHORTCUTS;
+}
+
+export interface OpenShortcutSettingsMessage {
+  type: typeof BACKGROUND_MESSAGE.OPEN_SHORTCUT_SETTINGS;
+}
+
+export interface ToggleCommandBarBackgroundMessage {
+  type: typeof BACKGROUND_MESSAGE.TOGGLE_COMMAND_BAR;
+}
+
+export interface VoiceStartMessage {
+  type: typeof BACKGROUND_MESSAGE.VOICE_START;
+  backendUrl?: string;
+}
+
+export interface VoiceStopMessage {
+  type: typeof BACKGROUND_MESSAGE.VOICE_STOP;
+  backendUrl?: string;
+}
+
+export interface VoiceHotkeyMessage {
+  type: typeof CONTENT_MESSAGE.VOICE_HOTKEY;
+  event: "keydown" | "keyup";
+}
+
 export interface ApplyModsResult {
   applied: number;
   removed: number;
@@ -378,6 +437,7 @@ export type RuntimeRequest =
   | VisualEditCommitMessage
   | GetPageContentMessage
   | GetElementHtmlMessage
+  | ToggleCommandBarContentMessage
   | GetActiveTabsMessage
   | GetConsoleLogsMessage
   | ReloadAllTabsOnceMessage
@@ -387,7 +447,16 @@ export type RuntimeRequest =
   | StopVisualEditMessage
   | ApplyVisualEditMessage
   | CommitVisualEditsMessage
-  | DiscardVisualEditsMessage;
+  | DiscardVisualEditsMessage
+  | OpenDesignTabMessage
+  | OpenTraceTabMessage
+  | OpenSettingsTabMessage
+  | GetCommandShortcutsMessage
+  | OpenShortcutSettingsMessage
+  | ToggleCommandBarBackgroundMessage
+  | VoiceStartMessage
+  | VoiceStopMessage
+  | VoiceHotkeyMessage;
 
 export interface ChatClientEvent {
   type: typeof CLIENT_EVENT.CHAT;

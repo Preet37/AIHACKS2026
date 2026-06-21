@@ -1,6 +1,5 @@
 import { crx } from "@crxjs/vite-plugin";
 import react from "@vitejs/plugin-react";
-import { resolve } from "path";
 import { defineConfig } from "vite";
 import manifest from "./manifest.config";
 
@@ -12,9 +11,13 @@ export default defineConfig({
     sourcemap: true,
     rollupOptions: {
       input: {
-        offscreen: resolve(__dirname, "offscreen.html"),
-      },
-    },
+        index: "index.html",
+        design: "design.html",
+        run: "run.html",
+        settings: "settings.html",
+        offscreen: "offscreen.html"
+      }
+    }
   },
   server: {
     port: 5173,

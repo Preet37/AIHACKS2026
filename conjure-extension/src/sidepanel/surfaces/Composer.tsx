@@ -6,7 +6,8 @@ import { useSurface } from "../surfaceContext";
 import "./Invoke.css";
 
 export function Composer() {
-  const { input, setInput, handleCommandSubmit, voiceState, activateMic } = useSurface();
+  const { input, setInput, handleCommandSubmit, voiceState, voiceError, barAmplitudes, activateMic } =
+    useSurface();
 
   const handleSubmit = () => {
     if (!input.trim()) return;
@@ -17,21 +18,27 @@ export function Composer() {
     voiceState === "recording" ? "Stop recording"
     : voiceState === "transcribing" ? "Transcribing…"
     : voiceState === "speaking" ? "Speaking…"
-    : "Start voice";
+    : "Hold Alt / Option to talk";
 
   return (
-    <div className={`cj-composer${voiceState !== "idle" ? " cj-composer--voice-active" : ""}`} aria-label="Command bar">
+    <div
+      className={`cj-composer${voiceState !== "idle" ? " cj-composer--voice-active" : ""}`}
+      aria-label="Command bar"
+    >
       <CommandInput
         value={input}
         onChange={setInput}
         onSubmit={handleSubmit}
-        placeholder={voiceState === "recording" ? "Listening…" : "ask or speak to conjure…"}
+        placeholder="ask or speak to conjure…"
         size="bar"
         showMic
         onMic={voiceState === "idle" || voiceState === "recording" ? () => void activateMic() : undefined}
         showShortcut
         ariaLabel={micLabel}
+        voiceState={voiceState}
+        barAmplitudes={barAmplitudes}
       />
+      {voiceError ? <p className="cj-composer__voice-error">{voiceError}</p> : null}
     </div>
   );
 }

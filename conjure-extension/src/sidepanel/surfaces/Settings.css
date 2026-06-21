@@ -53,6 +53,13 @@
   flex: 0 0 auto;
 }
 
+.sp-header-mode {
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 /* project pane: key/value input row */
 .sp-kv-row {
   display: grid;
@@ -76,6 +83,14 @@
 
 .sp-kv-val {
   min-width: 0;
+}
+
+.sp-kv-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cj-text);
+  font-size: var(--cj-fs-body);
 }
 
 .sp-input {
@@ -103,6 +118,13 @@
   flex-direction: column;
   gap: var(--cj-row-gap);
   padding-top: 4px;
+}
+
+.sp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: var(--cj-row-gap);
 }
 
 .sp-tab-chip {

@@ -142,13 +142,71 @@
 .cj-composer--voice-active {
   border-top-color: var(--cj-accent);
 }
-.cj-composer--voice-active .cj-cmd__mic {
+
+/* Mic button: active (recording / speaking / transcribing) pulses in accent */
+.cj-cmd__mic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  color: var(--cj-faint);
+  cursor: pointer;
+  padding: 4px;
+  transition: color 0.15s ease;
+}
+.cj-cmd__mic:hover {
+  color: var(--cj-text);
+}
+.cj-cmd__mic--active {
   color: var(--cj-accent);
   animation: cj-mic-pulse 1.2s ease-in-out infinite;
 }
 @keyframes cj-mic-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  50% { opacity: 0.45; }
+}
+
+/* Spinner reuse for transcribing */
+.cj-spin {
+  animation: cj-spin 0.8s linear infinite;
+}
+@keyframes cj-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Live waveform — replaces the text input while recording */
+.cj-cmd__wave {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 100%;
+  min-height: 20px;
+  padding: 0 2px;
+}
+.cj-cmd__wave-bar {
+  flex: 1 1 auto;
+  min-width: 2px;
+  height: 60%;
+  background: var(--cj-accent);
+  border-radius: 1px;
+  transform-origin: center;
+  transform: scaleY(0.08);
+  transition: transform 0.06s linear;
+}
+
+/* Recording border emphasis */
+.cj-cmd--voice-recording {
+  border-color: var(--cj-accent) !important;
+}
+
+/* Inline voice error under the bar */
+.cj-composer__voice-error {
+  margin: 0;
+  padding: 4px var(--cj-pane-pad, 12px);
+  color: var(--cj-faint);
+  font-size: var(--cj-fs-micro);
 }
 
 /* ── PlanningPanel ──────────────────────────────────────────────────────── */

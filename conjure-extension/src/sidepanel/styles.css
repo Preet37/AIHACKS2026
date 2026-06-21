@@ -59,7 +59,7 @@ figure {
 /* ── Tiling frame (§5) ─────────────────────────────────────────────────── */
 .conjure-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 400px);
+  grid-template-columns: minmax(0, 1fr);
   width: 100%;
   height: 100vh;
   overflow: hidden;
@@ -85,17 +85,14 @@ figure {
   overflow: hidden;
   border-right: 1px solid var(--cj-line);
   /* faint 40px grid — a quiet WM texture, drawn from a token, not a glow */
-  background:
-    linear-gradient(color-mix(in srgb, var(--cj-text) 3%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--cj-text) 3%, transparent) 1px, transparent 1px),
-    var(--cj-ground);
-  background-size: 40px 40px;
+  background: var(--cj-ground);
 }
 
 .conjure-panel {
   display: grid;
   grid-template-rows: var(--cj-bar-h) minmax(0, 1fr) auto;
   min-width: 0;
+  width: 100%;
   height: 100vh;
   border-left: 1px solid var(--cj-line);
   background: var(--cj-ground);
@@ -105,9 +102,9 @@ figure {
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
   overflow-y: auto;
-  padding: 10px;
+  padding: 0;
 }
 
 .panel-scroll::-webkit-scrollbar {
@@ -126,7 +123,9 @@ figure {
 .rules-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--cj-row-gap);
+  padding: var(--cj-pane-pad);
+  border-top: 1px solid var(--cj-line);
 }
 
 .rules-strip span {

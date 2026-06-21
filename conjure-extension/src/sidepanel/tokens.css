@@ -1,18 +1,41 @@
 /*
  * Conjure design tokens — the contract (CONJURE-DESIGN.md §2).
  * Single source of truth. Nothing else in the codebase hardcodes a hex,
- * a radius, or a font stack. JetBrains Mono is self-hosted via
- * @fontsource/jetbrains-mono (imported in main.tsx). No pixel face is
- * bundled: --cj-font-pixel falls back to mono, and the splash identity is
- * carried by the hand-built CSS pixel mark.
+ * a radius, or a font stack. Fonts are bundled under public/fonts so MV3
+ * pages and content overlays can resolve them from the extension package.
  */
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Silkscreen";
+  src: url("/fonts/Silkscreen-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
 
 :root {
   /* grounds */
   --cj-ground:        #08080F; /* working surface — all dense chrome */
   --cj-surface:       #101026; /* raised panes, inputs, windows */
   --cj-surface-2:     #16163A; /* hover / nested surface */
-  --cj-loud:          #222290; /* royal indigo — splash & empty states ONLY */
+  --cj-loud:          #222290; /* royal indigo — legacy loud ground */
+  --cj-overlay-loud:  #222290; /* command overlay scrim/border */
 
   /* text */
   --cj-text:          #F0F0F5;
@@ -36,7 +59,7 @@
 
   /* type */
   --cj-font-mono:  'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
-  --cj-font-pixel: 'Departure Mono', 'Silkscreen', monospace; /* wordmark + splash only */
+  --cj-font-pixel: 'Silkscreen', 'JetBrains Mono', monospace; /* wordmark only */
 
   /* type scale */
   --cj-fs-micro: 11px; /* metadata keys, hints, footer */
@@ -53,4 +76,9 @@
   --cj-pane-pad: 12px;
   --cj-row-gap:  6px;
   --cj-bar-h:    34px; /* status bar + command bar height */
+
+  /* motion */
+  --cj-dur-fast: 120ms;
+  --cj-dur-med:  180ms;
+  --cj-ease:     cubic-bezier(0.2, 0, 0, 1);
 }

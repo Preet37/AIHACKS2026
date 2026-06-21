@@ -9,6 +9,7 @@ import {
   type ApplyModsResult,
   type ApplyVisualEditMessage,
   type CommitVisualEditsMessage,
+  type CommandShortcutInfo,
   type ConsoleLogEntry,
   type ConsoleLevel,
   type ContentConsoleEventMessage,
@@ -18,6 +19,9 @@ import {
   type GeneratedModErrorPayload,
   type GeneratedModErrorSource,
   type GetConsoleLogsMessage,
+  type OpenDesignTabMessage,
+  type OpenSettingsTabMessage,
+  type OpenTraceTabMessage,
   type RemoveModMessage,
   type RuntimeRequest,
   type RuntimeResult,
@@ -320,6 +324,14 @@ const captureGeneratedModError = (
   return { ok: true, data: null };
 };
 
+const isRuntimeAvailable = () => {
+  try {
+    return Boolean(chrome.runtime?.id);
+  } catch {
+    return false;
+  }
+};
+
 const makeId = () =>
   globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -417,6 +429,116 @@ const forwardVisualEditMessage = async (
   }
 };
 
+const openExtensionTab = async (page: "design.html" | "run.html"): Promise<RuntimeResult<{ opened: boolean }>> => {
+  if (!isRuntimeAvailable()) return { ok: false, error: "Extension runtime is unavailable." };
+  await chrome.tabs.create({ url: chrome.runtime.getURL(page) });
+  return { ok: true, data: { opened: true } };
+};
+
+const openSettingsTab = async (): Promise<RuntimeResult<{ opened: boolean }>> => {
+  if (!isRuntimeAvailable()) return { ok: false, error: "Extension runtime is unavailable." };
+  await chrome.runtime.openOptionsPage();
+  return { ok: true, data: { opened: true } };
+};
+
+const getCommandShortcuts = async (): Promise<RuntimeResult<CommandShortcutInfo[]>> => {
+  if (!isRuntimeAvailable() || !chrome.commands?.getAll) {
+    return { ok: false, error: "Command shortcuts are unavailable." };
+  }
+  const commands = await chrome.commands.getAll();
+  return {
+    ok: true,
+    data: commands
+      .filter((command): command is chrome.commands.Command & { name: string } => typeof command.name === "string")
+      .map(({ name, description, shortcut }) => ({ name, description, shortcut }))
+  };
+};
+
+const openShortcutSettings = async (): Promise<RuntimeResult<{ opened: boolean; url: string }>> => {
+  const url = "chrome://extensions/shortcuts";
+  if (!isRuntimeAvailable()) return { ok: false, error: "Extension runtime is unavailable." };
+  try {
+    await chrome.tabs.create({ url });
+    return { ok: true, data: { opened: true, url } };
+  } catch {
+    return { ok: false, error: `Open ${url} manually.` };
+  }
+};
+
+const isInjectableTab = (tab?: chrome.tabs.Tab) =>
+  typeof tab?.id === "number" && /^https?:\/\//.test(tab.url || "");
+
+const getActiveTab = async (): Promise<chrome.tabs.Tab | undefined> => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return typeof tab?.id === "number" ? tab : undefined;
+};
+
+const getCommandTargetTab = async (sender?: chrome.runtime.MessageSender): Promise<chrome.tabs.Tab | undefined> => {
+  if (isInjectableTab(sender?.tab)) return sender?.tab;
+
+  const active = await getActiveTab();
+  if (isInjectableTab(active)) return active;
+
+  const currentWindowTabs = await chrome.tabs.query({ currentWindow: true });
+  const currentWindowTarget = currentWindowTabs
+    .filter(isInjectableTab)
+    .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+  if (currentWindowTarget) return currentWindowTarget;
+
+  const allTabs = await chrome.tabs.query({});
+  return allTabs
+    .filter(isInjectableTab)
+    .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+};
+
+const openSidePanelFallback = async (tab?: chrome.tabs.Tab) => {
+  try {
+    if (typeof tab?.windowId === "number") {
+      await chrome.sidePanel.open({ windowId: tab.windowId });
+    }
+  } catch {
+    // Best-effort fallback for restricted pages.
+  }
+};
+
+const ensureContentScript = async (tabId: number) => {
+  try {
+    const loader = chrome.runtime.getManifest().content_scripts?.[0]?.js?.[0];
+    if (!loader) return;
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: [loader]
+    });
+  } catch {
+    // Static content-script registration is the primary path. This best-effort
+    // injection only helps already-open tabs after an extension reload.
+  }
+};
+
+const toggleCommandBar = async (
+  sender?: chrome.runtime.MessageSender
+): Promise<RuntimeResult<{ delivered: boolean; fallback: boolean; tabId?: number }>> => {
+  if (!isRuntimeAvailable()) return { ok: false, error: "Extension runtime is unavailable." };
+  const tab = await getCommandTargetTab(sender);
+  if (typeof tab?.id !== "number") {
+    return { ok: false, error: "No normal webpage tab is available for the command overlay." };
+  }
+
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: CONTENT_MESSAGE.TOGGLE_COMMAND_BAR });
+    return { ok: true, data: { delivered: true, fallback: false, tabId: tab.id } };
+  } catch {
+    await ensureContentScript(tab.id);
+    try {
+      await chrome.tabs.sendMessage(tab.id, { type: CONTENT_MESSAGE.TOGGLE_COMMAND_BAR });
+      return { ok: true, data: { delivered: true, fallback: false, tabId: tab.id } };
+    } catch {
+      await openSidePanelFallback(tab);
+      return { ok: true, data: { delivered: false, fallback: true, tabId: tab.id } };
+    }
+  }
+};
+
 const reloadAllTabsOnce = async (): Promise<RuntimeResult<{ reloaded: boolean; count: number }>> => {
   const stored = await chrome.storage.local.get(RELOAD_KEY);
   if (stored[RELOAD_KEY]) {
@@ -432,6 +554,164 @@ const reloadAllTabsOnce = async (): Promise<RuntimeResult<{ reloaded: boolean; c
   await chrome.storage.local.set({ [RELOAD_KEY]: true });
 
   return { ok: true, data: { reloaded: true, count: reloadable.length } };
+};
+
+/**
+ * Voice capture via tab injection (Wispr-Flow push-to-talk).
+ *
+ * The side panel can't reliably getUserMedia on macOS, so we inject a recorder
+ * into the active web tab — which already holds mic permission. Hold Alt/Option
+ * to start, release to stop + transcribe. Amplitude streams back to the panel
+ * via VOICE_AMPLITUDE broadcasts for the live waveform.
+ */
+const getActiveWebTabId = async (): Promise<number | null> => {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs.find((t) => /^https?:\/\//.test(t.url || ""));
+  return typeof tab?.id === "number" ? tab.id : null;
+};
+
+type InjectedStartResult = { ok: true; mimeType: string } | { ok: false; error: string };
+type InjectedStopResult = { ok: true; transcript: string } | { ok: false; error: string };
+
+const handleVoiceStart = async (): Promise<RuntimeResult<{ started: boolean }>> => {
+  const tabId = await getActiveWebTabId();
+  if (tabId === null) {
+    return { ok: false, error: "No active web page — open a website first, then try voice." };
+  }
+  try {
+    const [injection] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (): Promise<InjectedStartResult> => {
+        const w = window as Window & {
+          __cqStream?: MediaStream;
+          __cqRecorder?: MediaRecorder;
+          __cqChunks?: Blob[];
+          __cqAmpTimer?: ReturnType<typeof setInterval>;
+          __cqAudioCtx?: AudioContext;
+        };
+        if (w.__cqAmpTimer !== undefined) clearInterval(w.__cqAmpTimer);
+        w.__cqAudioCtx?.close().catch(() => {});
+        w.__cqStream?.getTracks().forEach((t) => t.stop());
+
+        try {
+          w.__cqStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          w.__cqChunks = [];
+
+          const mimeType =
+            ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) =>
+              MediaRecorder.isTypeSupported(m)
+            ) ?? "";
+
+          w.__cqRecorder = new MediaRecorder(w.__cqStream, mimeType ? { mimeType } : undefined);
+          w.__cqRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) w.__cqChunks!.push(e.data);
+          };
+          w.__cqRecorder.start(100);
+
+          const ctx = new AudioContext();
+          w.__cqAudioCtx = ctx;
+          const src = ctx.createMediaStreamSource(w.__cqStream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 512;
+          analyser.smoothingTimeConstant = 0.7;
+          src.connect(analyser);
+          const buf = new Uint8Array(analyser.frequencyBinCount);
+          const BAR_COUNT = 20;
+          w.__cqAmpTimer = setInterval(() => {
+            analyser.getByteFrequencyData(buf);
+            const usable = Math.floor(buf.length * 0.5);
+            const step = Math.max(1, Math.floor(usable / BAR_COUNT));
+            const bars = Array.from({ length: BAR_COUNT }, (_, i) => {
+              let sum = 0;
+              for (let j = 0; j < step; j++) sum += buf[i * step + j] ?? 0;
+              return Math.min(1, (sum / step / 255) * 2.5);
+            });
+            chrome.runtime.sendMessage({ type: "VOICE_AMPLITUDE", bars }).catch(() => {});
+          }, 50);
+
+          return { ok: true, mimeType: w.__cqRecorder.mimeType };
+        } catch (err) {
+          return { ok: false, error: (err as Error).message };
+        }
+      }
+    });
+
+    const result = injection?.result as InjectedStartResult | undefined;
+    if (result?.ok) return { ok: true, data: { started: true } };
+    return { ok: false, error: (result && !result.ok && result.error) || "Could not start recording" };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+};
+
+const handleVoiceStop = async (
+  backendUrl: string
+): Promise<RuntimeResult<{ transcript: string }>> => {
+  const tabId = await getActiveWebTabId();
+  if (tabId === null) {
+    return { ok: false, error: "No active web page" };
+  }
+  try {
+    const [injection] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (bUrl: string): Promise<InjectedStopResult> => {
+        const w = window as Window & {
+          __cqStream?: MediaStream;
+          __cqRecorder?: MediaRecorder;
+          __cqChunks?: Blob[];
+          __cqAmpTimer?: ReturnType<typeof setInterval>;
+          __cqAudioCtx?: AudioContext;
+        };
+
+        if (w.__cqAmpTimer !== undefined) clearInterval(w.__cqAmpTimer);
+        w.__cqAudioCtx?.close().catch(() => {});
+
+        const recorder = w.__cqRecorder;
+        if (!recorder || recorder.state === "inactive") {
+          w.__cqStream?.getTracks().forEach((t) => t.stop());
+          return { ok: false, error: "Not recording" };
+        }
+
+        await new Promise<void>((resolve) => {
+          recorder.onstop = () => resolve();
+          recorder.requestData();
+          recorder.stop();
+        });
+
+        w.__cqStream?.getTracks().forEach((t) => t.stop());
+        const mimeType = recorder.mimeType || "audio/webm";
+        const chunks = w.__cqChunks ?? [];
+
+        if (chunks.length === 0) return { ok: false, error: "No audio captured" };
+
+        const blob = new Blob(chunks, { type: mimeType });
+        if (blob.size < 200) return { ok: false, error: "Recording too short — speak louder" };
+
+        try {
+          const res = await fetch(`${bUrl}/voice/transcribe`, {
+            method: "POST",
+            headers: { "Content-Type": mimeType },
+            body: blob
+          });
+          if (!res.ok) {
+            const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+            return { ok: false, error: body?.detail ?? `HTTP ${res.status}` };
+          }
+          const data = (await res.json()) as { transcript: string };
+          return { ok: true, transcript: data.transcript ?? "" };
+        } catch (err) {
+          return { ok: false, error: (err as Error).message };
+        }
+      },
+      args: [backendUrl]
+    });
+
+    const result = injection?.result as InjectedStopResult | undefined;
+    if (result?.ok) return { ok: true, data: { transcript: result.transcript } };
+    return { ok: false, error: (result && !result.ok && result.error) || "Transcription failed" };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 };
 
 const handleRuntimeMessage = async (
@@ -451,6 +731,25 @@ const handleRuntimeMessage = async (
       return getConsoleLogs(message);
     case BACKGROUND_MESSAGE.GET_ACTIVE_TABS:
       return getActiveTabs();
+    case BACKGROUND_MESSAGE.OPEN_DESIGN_TAB:
+      return openExtensionTab("design.html");
+    case BACKGROUND_MESSAGE.OPEN_TRACE_TAB:
+      return openExtensionTab("run.html");
+    case BACKGROUND_MESSAGE.OPEN_SETTINGS_TAB:
+      return openSettingsTab();
+    case BACKGROUND_MESSAGE.GET_COMMAND_SHORTCUTS:
+      return getCommandShortcuts();
+    case BACKGROUND_MESSAGE.OPEN_SHORTCUT_SETTINGS:
+      return openShortcutSettings();
+    case BACKGROUND_MESSAGE.TOGGLE_COMMAND_BAR:
+      return toggleCommandBar(sender);
+    case BACKGROUND_MESSAGE.VOICE_START:
+      return handleVoiceStart();
+    case BACKGROUND_MESSAGE.VOICE_STOP:
+      return handleVoiceStop(message.backendUrl || CONJURE_CONFIG.backendUrl);
+    case CONTENT_MESSAGE.VOICE_HOTKEY:
+      // Broadcast relay from content script; the side panel handles it directly.
+      return { ok: true, data: null };
     case BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE:
       return reloadAllTabsOnce();
     case BACKGROUND_MESSAGE.APPLY_MODS:
@@ -482,6 +781,12 @@ chrome.runtime.onStartup.addListener(() => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   consoleLogsByTab.delete(tabId);
+});
+
+chrome.commands.onCommand.addListener((command) => {
+  if (command === "toggle-command-bar") {
+    toggleCommandBar().catch(captureException);
+  }
 });
 
 const respondToRuntimeMessage = (

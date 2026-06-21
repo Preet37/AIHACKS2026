@@ -10,9 +10,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  opacity: 0.24;
-  background-image: radial-gradient(var(--cj-line-strong) 1px, transparent 1px);
-  background-size: 18px 18px;
+  display: none;
 }
 
 .ds-canvas__bar {
@@ -33,6 +31,13 @@
   white-space: nowrap;
 }
 
+.ds-canvas__controls {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 6px;
+  color: var(--cj-dim);
+}
+
 .ds-canvas__bar-title {
   min-width: 0;
   overflow: hidden;
@@ -50,6 +55,7 @@
   z-index: 1;
   display: grid;
   align-items: center;
+  justify-items: center;
   padding: calc(var(--cj-pane-pad) * 2);
   overflow: hidden;
   background: var(--cj-ground);
@@ -58,7 +64,7 @@
 .ds-mock-page {
   display: flex;
   flex-direction: column;
-  width: min(320px, 100%);
+  width: min(320px, calc(100% - 28px));
   min-height: min(240px, calc(100vh - 86px));
   padding: 22px 18px 18px;
   border: 1px solid var(--cj-line-strong);
@@ -145,6 +151,30 @@
   outline-offset: 1px;
 }
 
+.ds-swatch--ground {
+  background: var(--cj-ground);
+}
+
+.ds-swatch--surface {
+  background: var(--cj-surface);
+}
+
+.ds-swatch--surface-2 {
+  background: var(--cj-surface-2);
+}
+
+.ds-swatch--dim {
+  background: var(--cj-dim);
+}
+
+.ds-swatch--text {
+  background: var(--cj-text);
+}
+
+.ds-swatch--accent {
+  background: var(--cj-accent);
+}
+
 .ds-swatch--none {
   position: relative;
   background: transparent;
@@ -178,6 +208,11 @@
   font-size: var(--cj-fs-micro);
 }
 
+.ds-slider-zero {
+  color: var(--cj-faint);
+  font-size: var(--cj-fs-micro);
+}
+
 .ds-slider-track {
   position: relative;
   height: 12px;
@@ -192,12 +227,20 @@
   background: var(--cj-accent);
 }
 
+.ds-slider-fill--padding {
+  width: 42%;
+}
+
 .ds-slider-thumb {
   position: absolute;
   top: -5px;
   width: 5px;
   height: 10px;
   background: var(--cj-text);
+}
+
+.ds-slider-thumb--padding {
+  left: calc(42% - 3px);
 }
 
 .ds-field-pair {
@@ -220,4 +263,8 @@
 .ds-input:focus {
   outline: none;
   border-color: var(--cj-accent);
+}
+
+.ds-run-agent {
+  justify-content: flex-start;
 }
