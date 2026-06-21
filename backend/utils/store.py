@@ -60,6 +60,23 @@ class Store(Protocol):
     async def list_rules(self, project_id: str) -> list[dict[str, Any]]:
         ...
 
+    async def set_devin_session(
+        self,
+        conversation_id: str,
+        *,
+        project_id: str,
+        devin_session_id: str,
+        devin_url: str = "",
+        status: str = "",
+        status_detail: str = "",
+        pull_requests: list[dict[str, Any]] | None = None,
+        last_message_cursor: str = "",
+    ) -> dict[str, Any]:
+        ...
+
+    async def get_devin_session(self, conversation_id: str) -> dict[str, Any] | None:
+        ...
+
 
 @dataclass(frozen=True)
 class StoreConfig:
@@ -391,6 +408,52 @@ class RedisStore:
         )
         return [self._event_from_stream_row(row) for row in rows]
 
+    async def set_devin_session(
+        self,
+        conversation_id: str,
+        *,
+        project_id: str,
+        devin_session_id: str,
+        devin_url: str = "",
+        status: str = "",
+        status_detail: str = "",
+        pull_requests: list[dict[str, Any]] | None = None,
+        last_message_cursor: str = "",
+    ) -> dict[str, Any]:
+        record = {
+            "conversation_id": conversation_id,
+            "project_id": project_id,
+            "devin_session_id": devin_session_id,
+            "devin_url": devin_url,
+            "status": status,
+            "status_detail": status_detail,
+            "pull_requests": list(pull_requests or []),
+            "last_message_cursor": last_message_cursor,
+            "updated_at": self._ts(),
+        }
+        await self.redis.hset(
+            f"devin:session:{conversation_id}",
+            mapping={
+                "conversation_id": record["conversation_id"],
+                "project_id": record["project_id"],
+                "devin_session_id": record["devin_session_id"],
+                "devin_url": record["devin_url"],
+                "status": record["status"],
+                "status_detail": record["status_detail"],
+                "pull_requests_json": _json_dumps(record["pull_requests"]),
+                "last_message_cursor": record["last_message_cursor"],
+                "updated_at": record["updated_at"],
+            },
+        )
+        await self.redis.set(f"conversation:{conversation_id}:devin_session", devin_session_id)
+        return record
+
+    async def get_devin_session(self, conversation_id: str) -> dict[str, Any] | None:
+        raw = await self.redis.hgetall(f"devin:session:{conversation_id}")
+        if not raw:
+            return None
+        return self._devin_session_from_hash(raw)
+
     async def delete_conversation(self, conversation_id: str) -> None:
         message_ids = await self.redis.zrange(
             f"conversation:{conversation_id}:messages", 0, -1
@@ -532,6 +595,20 @@ class RedisStore:
             "payload": _json_loads(fields.get("payload_json", "{}"), {}),
         }
 
+    def _devin_session_from_hash(self, raw: Mapping[Any, Any]) -> dict[str, Any]:
+        data = _decode_hash(raw)
+        return {
+            "conversation_id": data.get("conversation_id", ""),
+            "project_id": data.get("project_id", ""),
+            "devin_session_id": data.get("devin_session_id", ""),
+            "devin_url": data.get("devin_url", ""),
+            "status": data.get("status", ""),
+            "status_detail": data.get("status_detail", ""),
+            "pull_requests": _json_loads(data.get("pull_requests_json", "[]"), []),
+            "last_message_cursor": data.get("last_message_cursor", ""),
+            "updated_at": _coerce_number(data.get("updated_at", 0)),
+        }
+
 
 class InMemoryStore:
     def __init__(
@@ -554,6 +631,7 @@ class InMemoryStore:
         self.jobs: dict[str, dict[str, Any]] = {}
         self.active_jobs: dict[str, str] = {}
         self.job_events: dict[str, list[dict[str, Any]]] = {}
+        self.devin_sessions: dict[str, dict[str, Any]] = {}
 
     async def create_project(
         self,
@@ -746,6 +824,35 @@ class InMemoryStore:
         if count is not None:
             events = events[:count]
         return events
+
+    async def set_devin_session(
+        self,
+        conversation_id: str,
+        *,
+        project_id: str,
+        devin_session_id: str,
+        devin_url: str = "",
+        status: str = "",
+        status_detail: str = "",
+        pull_requests: list[dict[str, Any]] | None = None,
+        last_message_cursor: str = "",
+    ) -> dict[str, Any]:
+        record = {
+            "conversation_id": conversation_id,
+            "project_id": project_id,
+            "devin_session_id": devin_session_id,
+            "devin_url": devin_url,
+            "status": status,
+            "status_detail": status_detail,
+            "pull_requests": list(pull_requests or []),
+            "last_message_cursor": last_message_cursor,
+            "updated_at": self._ts(),
+        }
+        self.devin_sessions[conversation_id] = dict(record)
+        return dict(record)
+
+    async def get_devin_session(self, conversation_id: str) -> dict[str, Any] | None:
+        return self._copy_or_none(self.devin_sessions.get(conversation_id))
 
     async def delete_conversation(self, conversation_id: str) -> None:
         message_ids = list(self.conversation_messages.get(conversation_id, {}))

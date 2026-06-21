@@ -23,7 +23,7 @@ For a first test without API keys, keep this in `.env`:
 CONJURE_DEMO_MODE=true
 ```
 
-This lets the backend run in demo mode without Anthropic or Browserbase credentials.
+This lets the backend run in demo mode without Devin, Claude, Nemotron, or Browserbase credentials.
 
 ## 2. Install Backend Dependencies
 
@@ -83,22 +83,65 @@ Then in Chrome:
 4. Select `D:\Documents\Code\2026\aihacks\AIHACKS2026\conjure-extension\dist`
 5. Click the Conjure extension icon
 
-The side panel should open. Type a prompt. In demo mode, the backend should stream a response and create a note under `demo_code/local-demo/`.
+The side panel should open. Type a prompt. In demo mode, the backend should stream simulated progress phrases for the selected provider.
 
-## 7. Test Real Claude Generation
+## 7. Test Real Devin Sessions
 
 Edit `.env`:
 
 ```env
+CONJURE_AGENT_PROVIDER=devin
 CONJURE_DEMO_MODE=false
-ANTHROPIC_API_KEY=your_key_here
+DEVIN_API_KEY=cog_your_key_here
+DEVIN_ORG_ID=org_your_org_id
+DEVIN_MODE=normal
+DEVIN_REPOS=Preet37/AIHACKS2026
+DEVIN_BRANCH=feat/Devin
 ```
 
 Restart the backend after changing `.env`.
 
-Keep Anthropic and other private keys server-side only. Do not put private keys in any `VITE_*` variable because those are bundled into the Chrome extension.
+Keep Devin and other private keys server-side only. Do not put private keys in any `VITE_*` variable because those are bundled into the Chrome extension.
 
-## 8. Enable Full Sandbox Mode
+## 8. Test Real Claude Local Tool Loop
+
+Edit `.env`:
+
+```env
+CONJURE_AGENT_PROVIDER=claude
+CONJURE_DEMO_MODE=false
+ANTHROPIC_API_KEY=sk-ant-your_key_here
+CONJURE_ANTHROPIC_MODEL=claude-sonnet-4-6
+```
+
+Restart the backend after changing `.env`.
+
+Claude runs through the local backend tool loop. It can read/write generated project files, run commands, and request browser context through the extension bridge.
+
+## 9. Test Real NVIDIA Nemotron Local Tool Loop
+
+Create an NVIDIA API Catalog key from `build.nvidia.com`. NVIDIA API Catalog keys should start with `nvapi-`.
+
+Edit `.env`:
+
+```env
+CONJURE_AGENT_PROVIDER=nemotron
+CONJURE_DEMO_MODE=false
+NVIDIA_API_KEY=nvapi-your-key-here
+NVIDIA_MODEL=nvidia/nemotron-3-super-120b-a12b
+```
+
+For a local or self-hosted NIM endpoint later, add:
+
+```env
+NVIDIA_API_BASE_URL=http://localhost:8000/v1
+```
+
+Restart the backend after changing `.env`.
+
+Nemotron runs through the same local backend tool loop as Claude. It can read/write generated project files, run commands, and request browser context through the extension bridge. It does not create Devin cloud sessions.
+
+## 10. Enable Full Sandbox Mode
 
 Add these values to `.env` when available:
 
@@ -119,7 +162,7 @@ REDIS_URL=redis://127.0.0.1:6379/0
 > resolves `localhost` to IPv6 (`::1`) and times out against the Docker
 > container, which only publishes on IPv4.
 
-## 9. Run Redis With Docker (recommended, reproducible)
+## 11. Run Redis With Docker (recommended, reproducible)
 
 The repo ships a `docker-compose.yml` pinned to `redis:7-alpine` with disk
 persistence. This is the easiest way for everyone on the team to run an
@@ -196,4 +239,3 @@ docker exec conjure-redis redis-cli keys '*'
 > PATH note: in a brand-new terminal before your next sign-in, if `docker`
 > errors with `docker-credential-desktop ... not found`, run once:
 > `$env:PATH = "$env:ProgramFiles\Docker\Docker\resources\bin;$env:PATH"`.
-

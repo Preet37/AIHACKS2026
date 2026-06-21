@@ -25,7 +25,7 @@ app = FastAPI(title="conjure backend")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -85,12 +85,44 @@ async def delete_project_mod(project_id: str, mod_id: str) -> dict[str, Any]:
     return {"project_id": project_id, "deleted": mod_id, "mods": mods_registry.list_mods(project_dir)}
 
 
+@app.patch("/projects/{project_id}/mods/{mod_id}")
+async def update_project_mod(project_id: str, mod_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Update structured mod metadata such as persisted visual edit operations."""
+    project_dir = project_dir_for(load_settings(), project_id)
+    existing = mods_registry.get_mod(project_dir, mod_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail=f"No mod with id {mod_id}")
+
+    updates: dict[str, Any] = {"id": mod_id}
+    if "visual_edits" in payload:
+        try:
+            updates["visual_edits"] = mods_registry.normalize_visual_edits(payload.get("visual_edits"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if "status" in payload:
+        status = payload.get("status")
+        if status not in {"active", "disabled"}:
+            raise HTTPException(status_code=400, detail="status must be active or disabled")
+        updates["status"] = status
+
+    if len(updates) == 1:
+        raise HTTPException(status_code=400, detail="No supported mod fields provided")
+
+    record = mods_registry.upsert_mod(project_dir, updates)
+    return {
+        "project_id": project_id,
+        "mod": record,
+        "mods": mods_registry.list_mods(project_dir),
+        "bundles": mods_registry.active_bundles(project_dir),
+    }
+
+
 @app.websocket("/ws/{project_id}")
 async def websocket_endpoint(websocket: WebSocket, project_id: str) -> None:
     await websocket.accept()
     settings = load_settings()
-    agent = ConjureAgent(settings)
     store = await _open_store()
+    agent = ConjureAgent(settings, store=store)
     chat_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
     pending_tab_requests: dict[str, asyncio.Future[Any]] = {}
     receiver = asyncio.create_task(

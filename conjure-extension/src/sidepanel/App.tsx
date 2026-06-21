@@ -3,18 +3,23 @@ import {
   AlertTriangle,
   CheckCircle2,
   Circle,
+  EyeOff,
   ExternalLink,
   Loader2,
   MessageSquareText,
   Mic,
+  MousePointer2,
   Pencil,
   Puzzle,
   RefreshCcw,
+  Redo2,
+  Save,
   Send,
+  SlidersHorizontal,
   Terminal,
   Trash2,
+  Undo2,
   Volume2,
-  Wrench,
   XCircle
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -35,6 +40,8 @@ import {
   SERVER_EVENT,
   type ActiveTabSnapshot,
   type ApplyModsResult,
+  type AgentProvider,
+  type AgentPullRequest,
   type ClientToServerEvent,
   type ConsoleLogEntry,
   type GeneratedBundle,
@@ -42,7 +49,11 @@ import {
   type GetPageContentMessage,
   type ModRecord,
   type PageContentResult,
+  type RuntimeRequest,
   type RuntimeResult,
+  type VisualEditOperation,
+  type VisualEditSelection,
+  type VisualEditSessionState,
   type ServerToClientEvent
 } from "../shared/messages";
 
@@ -74,37 +85,45 @@ interface ToolRun {
   endedAt?: number;
 }
 
-interface PlanStep {
-  id: string;
-  title: string;
-  status: "pending" | "running" | "done";
-}
-
-interface SandboxScreenshot {
-  id: string;
-  url?: string;
-  data?: string;
-  createdAt: number;
-}
-
-interface SandboxHealingStep {
-  id: string;
-  iteration: number;
-  fixSummary?: string;
-}
-
-interface SandboxState {
+interface AgentRunState {
   active: boolean;
-  targetUrl?: string;
-  screenshots: SandboxScreenshot[];
-  healing: SandboxHealingStep[];
-  result?: {
-    passed: boolean;
-    findings: string[];
-    replayUrl?: string;
-  };
+  provider?: AgentProvider;
+  phrase: string;
+  status?: string;
+  statusDetail?: string;
+  sessionUrl?: string;
+  pullRequests: AgentPullRequest[];
 }
 
+interface VisualEditDraft {
+  text: string;
+  color: string;
+  backgroundColor: string;
+  fontSize: string;
+  padding: string;
+  margin: string;
+  borderRadius: string;
+  hidden: boolean;
+  x: string;
+  y: string;
+  width: string;
+  height: string;
+}
+
+const emptyVisualEditDraft: VisualEditDraft = {
+  text: "",
+  color: "#18201c",
+  backgroundColor: "#ffffff",
+  fontSize: "",
+  padding: "",
+  margin: "",
+  borderRadius: "",
+  hidden: false,
+  x: "0",
+  y: "0",
+  width: "",
+  height: ""
+};
 
 const initSentry = () => {
   if (!CONJURE_CONFIG.sentry.enabled) return;
@@ -225,6 +244,62 @@ const formatTime = (timestamp: number) =>
     minute: "2-digit"
   }).format(timestamp);
 
+const replaceVisualOperation = (operations: VisualEditOperation[], operation: VisualEditOperation) => [
+  ...operations.filter((candidate) => candidate.id !== operation.id),
+  operation
+];
+
+const visualOperationId = (selection: VisualEditSelection, type: VisualEditOperation["type"]) =>
+  `${type}:${selection.selector}`;
+
+const parseCssNumber = (value: string | undefined) => {
+  if (!value) return "";
+  const number = Number.parseFloat(value);
+  return Number.isFinite(number) ? String(Math.round(number)) : "";
+};
+
+const numericCssValue = (value: string) => {
+  const number = Number.parseFloat(value);
+  return Number.isFinite(number) ? `${number}px` : "";
+};
+
+const finiteNumber = (value: string) => {
+  const number = Number.parseFloat(value);
+  return Number.isFinite(number) ? number : undefined;
+};
+
+const draftBoxValue = (value: number | undefined, fallback: string) =>
+  typeof value === "number" && Number.isFinite(value) ? String(Math.round(value)) : fallback;
+
+const colorToHex = (value: string | undefined, fallback: string) => {
+  if (!value) return fallback;
+  if (/^#[0-9a-f]{6}$/i.test(value.trim())) return value.trim();
+  const match = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  if (!match) return fallback;
+  return [match[1], match[2], match[3]]
+    .map((part) => Math.max(0, Math.min(255, Number(part))).toString(16).padStart(2, "0"))
+    .join("")
+    .replace(/^/, "#");
+};
+
+const visualDraftFromSelection = (selection: VisualEditSelection): VisualEditDraft => ({
+  text: selection.text,
+  color: colorToHex(selection.computedStyle.color, emptyVisualEditDraft.color),
+  backgroundColor: colorToHex(
+    selection.computedStyle.backgroundColor,
+    emptyVisualEditDraft.backgroundColor
+  ),
+  fontSize: parseCssNumber(selection.computedStyle.fontSize),
+  padding: parseCssNumber(selection.computedStyle.padding),
+  margin: parseCssNumber(selection.computedStyle.margin),
+  borderRadius: parseCssNumber(selection.computedStyle.borderRadius),
+  hidden: selection.computedStyle.display === "none",
+  x: "0",
+  y: "0",
+  width: String(Math.round(selection.rect.width)),
+  height: String(Math.round(selection.rect.height))
+});
+
 export default function App() {
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const [projectId, setProjectId] = useState(CONJURE_CONFIG.projectId);
@@ -234,46 +309,50 @@ export default function App() {
     {
       id: makeId(),
       role: "assistant",
-      content: "Tell me what to build for this browser. I can inspect active tabs, stream tool work, and show sandbox results here.",
+      content: "Tell me what to build for this browser. I will route the work to the configured agent and keep progress visible here.",
       createdAt: Date.now()
     }
   ]);
   const [activeTabs, setActiveTabs] = useState<ActiveTabSnapshot[]>([]);
-  const [tools, setTools] = useState<ToolRun[]>([]);
-  const [sandbox, setSandbox] = useState<SandboxState>({
+  const [agentRun, setAgentRun] = useState<AgentRunState>({
     active: false,
-    screenshots: [],
-    healing: []
+    phrase: "Waiting for an agent run.",
+    pullRequests: []
   });
   const [mods, setMods] = useState<ModRecord[]>([]);
   const [editingMod, setEditingMod] = useState<{ id: string; prompt: string } | null>(null);
+  const [visualEditModId, setVisualEditModId] = useState("");
+  const [visualEditSession, setVisualEditSession] = useState<VisualEditSessionState>({
+    active: false,
+    operations: [],
+    undoDepth: 0,
+    redoDepth: 0,
+    staleOperationIds: []
+  });
+  const [visualEditDraft, setVisualEditDraft] = useState<VisualEditDraft>(emptyVisualEditDraft);
+  const [visualEditPast, setVisualEditPast] = useState<VisualEditOperation[][]>([]);
+  const [visualEditFuture, setVisualEditFuture] = useState<VisualEditOperation[][]>([]);
+  const [tools, setTools] = useState<ToolRun[]>([]);
   const [rules, setRules] = useState<string[]>([]);
-  const [modsExpanded, setModsExpanded] = useState(false);
-  const [planSteps, setPlanSteps] = useState<PlanStep[]>([]);
-  const [planAwaitingApproval, setPlanAwaitingApproval] = useState(false);
   const [statusText, setStatusText] = useState("Ready");
 
   const socketRef = useRef<WebSocket | null>(null);
   const pendingOpenRef = useRef<Promise<WebSocket> | null>(null);
   const currentAssistantIdRef = useRef<string | null>(null);
-  // Accumulates streamed text outside React state so TTS can read it synchronously
-  const streamAccumRef = useRef<string>("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hydratedRef = useRef(false);
   const projectIdRef = useRef(projectId);
-  // Tracks whether the current session was voice-initiated so we know to TTS the reply
-  const voiceInitiatedRef = useRef(false);
-
-  useEffect(() => {
-    projectIdRef.current = projectId;
-  }, [projectId]);
-
-  // Transcript fills the input box AND auto-submits (voice = conversational mode).
+  const streamAccumRef = useRef<string>("");
   const submitChatRef = useRef<((query: string) => Promise<void>) | null>(null);
+
   const handleVoiceTranscript = useCallback((text: string) => {
     void submitChatRef.current?.(text);
   }, []);
   const { voiceState, voiceError, barAmplitudes, permissionState, activateMic, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
+
+  useEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
 
   const addSystemMessage = useCallback((content: string) => {
     setMessages((current) => [
@@ -356,6 +435,11 @@ export default function App() {
   );
 
   const activeTab = useMemo(() => activeTabs.find((tab) => tab.active) || activeTabs[0], [activeTabs]);
+  const visualEditMod = useMemo(
+    () => mods.find((mod) => mod.id === visualEditModId) || mods[0],
+    [mods, visualEditModId]
+  );
+  const selectedVisualEdit = visualEditSession.selected;
 
   const sendToServer = useCallback((payload: ClientToServerEvent) => {
     const socket = socketRef.current;
@@ -393,52 +477,46 @@ export default function App() {
     });
   }, []);
 
-  const finalizeAssistant = useCallback(
-    (content?: string) => {
-      // Grab the full streamed text NOW, synchronously, before any React batching
-      const fullText = content || streamAccumRef.current;
-      streamAccumRef.current = "";
+  const finalizeAssistant = useCallback((content?: string) => {
+    const fullText = content || streamAccumRef.current;
+    streamAccumRef.current = "";
 
-      setMessages((current) =>
-        current.map((message) =>
-          message.id === currentAssistantIdRef.current
-            ? { ...message, content: fullText || message.content, streaming: false }
-            : message
-        )
-      );
-      currentAssistantIdRef.current = null;
-      voiceInitiatedRef.current = false;
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === currentAssistantIdRef.current
+          ? { ...message, content: fullText || message.content, streaming: false }
+          : message
+      )
+    );
+    currentAssistantIdRef.current = null;
 
-      if (!fullText) return;
+    if (!fullText) return;
 
-      // ── Build a short spoken summary (1-2 sentences, ≤ 160 chars) ────────────
-      const forTTS = fullText
-        .replace(/\*\*Plan:\*\*[\s\S]*/, "")  // skip plan blocks
-        .replace(/```[\s\S]*?```/g, "")         // skip code blocks
-        .replace(/`[^`]+`/g, "")               // inline code
-        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // links → label
-        .replace(/[*_#>]/g, "")
-        .replace(/\n+/g, " ")
-        .trim();
+    // Build a short spoken summary (1-2 sentences, ≤ 160 chars)
+    const forTTS = fullText
+      .replace(/\*\*Plan:\*\*[\s\S]*/, "")
+      .replace(/```[\s\S]*?```/g, "")
+      .replace(/`[^`]+`/g, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/[*_#>]/g, "")
+      .replace(/\n+/g, " ")
+      .trim();
 
-      // Extract first 1-2 sentences
-      const sentenceEnd = /[.!?]/g;
-      let spoken = forTTS;
-      let match: RegExpExecArray | null;
-      let count = 0;
-      while ((match = sentenceEnd.exec(forTTS)) !== null) {
-        count++;
-        if (count >= 2) { spoken = forTTS.slice(0, match.index + 1); break; }
-      }
-      spoken = spoken.slice(0, 160).trim();
+    const sentenceEnd = /[.!?]/g;
+    let spoken = forTTS;
+    let match: RegExpExecArray | null;
+    let count = 0;
+    while ((match = sentenceEnd.exec(forTTS)) !== null) {
+      count++;
+      if (count >= 2) { spoken = forTTS.slice(0, match.index + 1); break; }
+    }
+    spoken = spoken.slice(0, 160).trim();
 
-      if (spoken) {
-        const endsWithQuestion = /\?\s*$/.test(spoken);
-        void speakText(spoken, { autoListen: endsWithQuestion });
-      }
-    },
-    [speakText]
-  );
+    if (spoken) {
+      const endsWithQuestion = /\?\s*$/.test(spoken);
+      void speakText(spoken, { autoListen: endsWithQuestion });
+    }
+  }, [speakText]);
 
   const getActiveTabs = useCallback(async () => {
     const response = await chrome.runtime.sendMessage({
@@ -452,6 +530,350 @@ export default function App() {
 
     return [];
   }, []);
+
+  const sendVisualEditCommand = useCallback(async <T,>(message: RuntimeRequest): Promise<T> => {
+    const response = await chrome.runtime.sendMessage(message);
+    if (isRuntimeOk<T>(response)) return response.data;
+    throw new Error(response?.error || "Visual edit command failed.");
+  }, []);
+
+  const previewVisualOperations = useCallback(
+    async (operations: VisualEditOperation[]) => {
+      if (!activeTab?.id) return;
+      const staleOperationIds = new Set<string>();
+      await sendVisualEditCommand({
+        type: BACKGROUND_MESSAGE.DISCARD_VISUAL_EDITS,
+        tabId: activeTab.id
+      });
+      for (const operation of operations) {
+        const data = await sendVisualEditCommand<{ staleOperationIds?: string[] }>({
+          type: BACKGROUND_MESSAGE.APPLY_VISUAL_EDIT,
+          tabId: activeTab.id,
+          operation
+        });
+        (data.staleOperationIds || []).forEach((id) => staleOperationIds.add(id));
+      }
+      setVisualEditSession((current) => ({
+        ...current,
+        staleOperationIds: Array.from(staleOperationIds)
+      }));
+    },
+    [activeTab?.id, sendVisualEditCommand]
+  );
+
+  const startVisualEdit = useCallback(async () => {
+    if (!activeTab?.id) {
+      addSystemMessage("No active tab available for visual editing.");
+      return;
+    }
+    if (!visualEditMod) {
+      addSystemMessage("Create a mod before starting visual edit mode.");
+      return;
+    }
+
+    const operations = [...(visualEditMod.visual_edits || [])];
+    setStatusText("Starting visual edit");
+    try {
+      const data = await sendVisualEditCommand<{ staleOperationIds?: string[] }>({
+        type: BACKGROUND_MESSAGE.START_VISUAL_EDIT,
+        tabId: activeTab.id,
+        modId: visualEditMod.id,
+        visualEdits: operations
+      });
+      setVisualEditPast([]);
+      setVisualEditFuture([]);
+      setVisualEditSession({
+        active: true,
+        modId: visualEditMod.id,
+        operations,
+        undoDepth: 0,
+        redoDepth: 0,
+        staleOperationIds: data.staleOperationIds || []
+      });
+      setStatusText("Visual edit active");
+    } catch (error) {
+      setStatusText("Visual edit failed");
+      addSystemMessage(error instanceof Error ? error.message : String(error));
+    }
+  }, [activeTab?.id, addSystemMessage, sendVisualEditCommand, visualEditMod]);
+
+  const stopVisualEdit = useCallback(async () => {
+    if (activeTab?.id) {
+      try {
+        await sendVisualEditCommand({
+          type: BACKGROUND_MESSAGE.STOP_VISUAL_EDIT,
+          tabId: activeTab.id
+        });
+      } catch (error) {
+        captureException(error);
+      }
+    }
+    setVisualEditSession((current) => ({ ...current, active: false, selected: undefined }));
+    setStatusText("Visual edit stopped");
+  }, [activeTab?.id, sendVisualEditCommand]);
+
+  const toggleVisualEdit = useCallback(async () => {
+    if (visualEditSession.active) {
+      await stopVisualEdit();
+      return;
+    }
+    await startVisualEdit();
+  }, [startVisualEdit, stopVisualEdit, visualEditSession.active]);
+
+  const pushVisualOperation = useCallback(
+    async (operation: VisualEditOperation) => {
+      if (!activeTab?.id || !visualEditSession.active) return;
+      const currentOperations = visualEditSession.operations;
+      const nextOperations = replaceVisualOperation(currentOperations, operation);
+      const nextPast = [...visualEditPast, currentOperations].slice(-30);
+      setVisualEditPast(nextPast);
+      setVisualEditFuture([]);
+      setVisualEditSession((current) => ({
+        ...current,
+        operations: nextOperations,
+        undoDepth: nextPast.length,
+        redoDepth: 0
+      }));
+
+      try {
+        const data = await sendVisualEditCommand<{ staleOperationIds?: string[] }>({
+          type: BACKGROUND_MESSAGE.APPLY_VISUAL_EDIT,
+          tabId: activeTab.id,
+          operation
+        });
+        setVisualEditSession((current) => ({
+          ...current,
+          staleOperationIds: data.staleOperationIds || []
+        }));
+      } catch (error) {
+        addSystemMessage(error instanceof Error ? error.message : String(error));
+      }
+    },
+    [
+      activeTab?.id,
+      addSystemMessage,
+      sendVisualEditCommand,
+      visualEditPast,
+      visualEditSession.active,
+      visualEditSession.operations
+    ]
+  );
+
+  const updateVisualText = useCallback(
+    (value: string) => {
+      setVisualEditDraft((current) => ({ ...current, text: value }));
+      if (!selectedVisualEdit?.editable) return;
+      void pushVisualOperation({
+        id: visualOperationId(selectedVisualEdit, "setText"),
+        type: "setText",
+        selector: selectedVisualEdit.selector,
+        value,
+        url: selectedVisualEdit.url
+      });
+    },
+    [pushVisualOperation, selectedVisualEdit]
+  );
+
+  const updateVisualStyle = useCallback(
+    (
+      draftKey: keyof Pick<
+        VisualEditDraft,
+        "color" | "backgroundColor" | "fontSize" | "padding" | "margin" | "borderRadius"
+      >,
+      property: "color" | "backgroundColor" | "fontSize" | "padding" | "margin" | "borderRadius",
+      value: string,
+      cssValue = value
+    ) => {
+      setVisualEditDraft((current) => ({ ...current, [draftKey]: value }));
+      if (!selectedVisualEdit?.editable) return;
+      const operationId = visualOperationId(selectedVisualEdit, "setStyle");
+      const existing = visualEditSession.operations.find(
+        (operation): operation is Extract<VisualEditOperation, { type: "setStyle" }> =>
+          operation.id === operationId && operation.type === "setStyle"
+      );
+      void pushVisualOperation({
+        id: operationId,
+        type: "setStyle",
+        selector: selectedVisualEdit.selector,
+        styles: {
+          ...(existing?.styles || {}),
+          [property]: cssValue
+        },
+        url: selectedVisualEdit.url
+      });
+    },
+    [pushVisualOperation, selectedVisualEdit, visualEditSession.operations]
+  );
+
+  const updateVisualBox = useCallback(
+    (
+      draftKey: keyof Pick<VisualEditDraft, "x" | "y" | "width" | "height">,
+      property: "x" | "y" | "width" | "height",
+      value: string
+    ) => {
+      setVisualEditDraft((current) => ({ ...current, [draftKey]: value }));
+      if (!selectedVisualEdit?.editable) return;
+      const number = finiteNumber(value);
+      if (number === undefined) return;
+      const operationId = visualOperationId(selectedVisualEdit, "setBox");
+      const existing = visualEditSession.operations.find(
+        (operation): operation is Extract<VisualEditOperation, { type: "setBox" }> =>
+          operation.id === operationId && operation.type === "setBox"
+      );
+      const nextBox: Extract<VisualEditOperation, { type: "setBox" }>["box"] = {
+        ...(existing?.box || {}),
+        [property]: number
+      };
+      if (property === "width" || property === "height") {
+        nextBox.sizing = {
+          ...(nextBox.sizing || {}),
+          [property]: "fixed"
+        };
+      }
+      void pushVisualOperation({
+        id: operationId,
+        type: "setBox",
+        selector: selectedVisualEdit.selector,
+        box: nextBox,
+        url: selectedVisualEdit.url
+      });
+    },
+    [pushVisualOperation, selectedVisualEdit, visualEditSession.operations]
+  );
+
+  const updateVisualHidden = useCallback(
+    (hidden: boolean) => {
+      setVisualEditDraft((current) => ({ ...current, hidden }));
+      if (!selectedVisualEdit?.editable) return;
+      void pushVisualOperation({
+        id: visualOperationId(selectedVisualEdit, "hide"),
+        type: "hide",
+        selector: selectedVisualEdit.selector,
+        hidden,
+        url: selectedVisualEdit.url
+      });
+    },
+    [pushVisualOperation, selectedVisualEdit]
+  );
+
+  const undoVisualEdit = useCallback(async () => {
+    const previousOperations = visualEditPast[visualEditPast.length - 1];
+    if (!previousOperations) return;
+    const nextPast = visualEditPast.slice(0, -1);
+    const nextFuture = [visualEditSession.operations, ...visualEditFuture].slice(0, 30);
+    setVisualEditPast(nextPast);
+    setVisualEditFuture(nextFuture);
+    setVisualEditSession((current) => ({
+      ...current,
+      operations: previousOperations,
+      undoDepth: nextPast.length,
+      redoDepth: nextFuture.length
+    }));
+    await previewVisualOperations(previousOperations);
+  }, [previewVisualOperations, visualEditFuture, visualEditPast, visualEditSession.operations]);
+
+  const redoVisualEdit = useCallback(async () => {
+    const nextOperations = visualEditFuture[0];
+    if (!nextOperations) return;
+    const nextPast = [...visualEditPast, visualEditSession.operations].slice(-30);
+    const nextFuture = visualEditFuture.slice(1);
+    setVisualEditPast(nextPast);
+    setVisualEditFuture(nextFuture);
+    setVisualEditSession((current) => ({
+      ...current,
+      operations: nextOperations,
+      undoDepth: nextPast.length,
+      redoDepth: nextFuture.length
+    }));
+    await previewVisualOperations(nextOperations);
+  }, [previewVisualOperations, visualEditFuture, visualEditPast, visualEditSession.operations]);
+
+  const discardVisualEdits = useCallback(async () => {
+    if (activeTab?.id) {
+      try {
+        await sendVisualEditCommand({
+          type: BACKGROUND_MESSAGE.DISCARD_VISUAL_EDITS,
+          tabId: activeTab.id
+        });
+        await sendVisualEditCommand({
+          type: BACKGROUND_MESSAGE.STOP_VISUAL_EDIT,
+          tabId: activeTab.id
+        });
+      } catch (error) {
+        captureException(error);
+      }
+    }
+    setVisualEditPast([]);
+    setVisualEditFuture([]);
+    setVisualEditDraft(emptyVisualEditDraft);
+    setVisualEditSession({
+      active: false,
+      modId: visualEditMod?.id,
+      operations: [...(visualEditMod?.visual_edits || [])],
+      undoDepth: 0,
+      redoDepth: 0,
+      staleOperationIds: []
+    });
+    setStatusText("Visual edits discarded");
+  }, [activeTab?.id, sendVisualEditCommand, visualEditMod]);
+
+  const saveVisualEdits = useCallback(async () => {
+    if (!visualEditMod) return;
+    const operations = visualEditSession.operations;
+    setStatusText("Saving visual edits");
+    try {
+      if (activeTab?.id) {
+        await sendVisualEditCommand({
+          type: BACKGROUND_MESSAGE.COMMIT_VISUAL_EDITS,
+          tabId: activeTab.id,
+          operations
+        });
+      }
+      const response = await fetch(createModUrl(projectIdRef.current, visualEditMod.id), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visual_edits: operations })
+      });
+      if (!response.ok) {
+        throw new Error(`Backend returned ${response.status} saving visual edits.`);
+      }
+      const data = (await response.json()) as { mods?: ModRecord[]; bundles?: GeneratedBundle[] };
+      setMods(data.mods || []);
+      if (activeTab?.id) {
+        try {
+          await sendVisualEditCommand({
+            type: BACKGROUND_MESSAGE.STOP_VISUAL_EDIT,
+            tabId: activeTab.id
+          });
+        } catch (error) {
+          captureException(error);
+        }
+      }
+      await applyModBundles(data.bundles || []);
+      setVisualEditPast([]);
+      setVisualEditFuture([]);
+      setVisualEditSession((current) => ({
+        ...current,
+        active: false,
+        selected: undefined,
+        operations,
+        undoDepth: 0,
+        redoDepth: 0
+      }));
+      setStatusText("Visual edits saved");
+      addSystemMessage(`Saved ${operations.length} visual edit(s) on "${visualEditMod.name}".`);
+    } catch (error) {
+      setStatusText("Save failed");
+      addSystemMessage(error instanceof Error ? error.message : String(error));
+    }
+  }, [
+    activeTab?.id,
+    addSystemMessage,
+    applyModBundles,
+    sendVisualEditCommand,
+    visualEditMod,
+    visualEditSession.operations
+  ]);
 
   const sendTabContentResponse = useCallback(
     (requestId: string, content: unknown) => {
@@ -581,38 +1003,10 @@ export default function App() {
         case SERVER_EVENT.CONVERSATION_ID:
           setConversationId(event.conversation_id);
           return;
-        case SERVER_EVENT.CONTENT: {
+        case SERVER_EVENT.CONTENT:
           appendAssistantContent(event.content);
-          // Parse plan steps from "**Plan:**\n- [ ] N. title — why" pattern
-          setMessages((current) => {
-            const msg = current.find((m) => m.id === currentAssistantIdRef.current);
-            if (!msg) return current;
-            const full = msg.content + (event.content as string);
-            const planBlock = /\*\*Plan:\*\*\n((?:- \[[ x]\].*\n?)+)/i.exec(full);
-            if (planBlock) {
-              const steps: PlanStep[] = [];
-              for (const line of planBlock[1].split("\n")) {
-                const m = /- \[[ x]\]\s+(\d+)\.\s+([^—–-]+)/.exec(line);
-                if (m) steps.push({ id: m[1], title: m[2].trim(), status: "pending" });
-              }
-              if (steps.length > 0) {
-                setPlanSteps(steps);
-                setPlanAwaitingApproval(true);
-              }
-            }
-            return current;
-          });
           return;
-        }
         case SERVER_EVENT.TOOL_START:
-          // Plan is executing — remove approval buttons
-          setPlanAwaitingApproval(false);
-          // Advance plan: mark the first pending step as running when tools start
-          setPlanSteps((steps) => {
-            const idx = steps.findIndex((s) => s.status === "pending");
-            if (idx === -1) return steps;
-            return steps.map((s, i) => i === idx ? { ...s, status: "running" } : s);
-          });
           setTools((current) => [
             {
               id: `${event.name}-${Date.now()}`,
@@ -626,12 +1020,6 @@ export default function App() {
           setStatusText(`Running ${event.name}`);
           return;
         case SERVER_EVENT.TOOL_END:
-          // Advance plan: mark the running step as done
-          setPlanSteps((steps) => {
-            const idx = steps.findIndex((s) => s.status === "running");
-            if (idx === -1) return steps;
-            return steps.map((s, i) => i === idx ? { ...s, status: "done" } : s);
-          });
           setTools((current) => {
             const index = current.findIndex((tool) => tool.name === event.name && tool.status === "running");
             if (index === -1) return current;
@@ -641,6 +1029,18 @@ export default function App() {
           });
           setStatusText("Tool complete");
           return;
+        case SERVER_EVENT.AGENT_STATUS:
+          setAgentRun({
+            active: Boolean(event.active),
+            provider: event.provider,
+            phrase: event.phrase,
+            status: event.status,
+            statusDetail: event.status_detail,
+            sessionUrl: event.session_url,
+            pullRequests: event.pull_requests || []
+          });
+          setStatusText(event.phrase);
+          return;
         case SERVER_EVENT.THINKING:
           setStatusText("Thinking");
           return;
@@ -649,57 +1049,6 @@ export default function App() {
           return;
         case SERVER_EVENT.REQUEST_CONSOLE_LOGS:
           void handleRequestConsoleLogs(raw);
-          return;
-        case SERVER_EVENT.SANDBOX_START:
-          setSandbox((current) => ({
-            ...current,
-            active: true,
-            targetUrl: readString(raw, "target_url", "targetUrl"),
-            result: undefined
-          }));
-          setStatusText("Sandbox running");
-          return;
-        case SERVER_EVENT.SANDBOX_SCREENSHOT:
-          setSandbox((current) => ({
-            ...current,
-            active: true,
-            screenshots: [
-              {
-                id: makeId(),
-                url: readString(raw, "url"),
-                data: readString(raw, "data"),
-                createdAt: Date.now()
-              },
-              ...current.screenshots
-            ].slice(0, 5)
-          }));
-          return;
-        case SERVER_EVENT.SANDBOX_RESULT:
-          setSandbox((current) => ({
-            ...current,
-            active: false,
-            result: {
-              passed: Boolean(raw.passed),
-              findings: Array.isArray(raw.findings) ? raw.findings.map(String) : [],
-              replayUrl: readString(raw, "replay_url", "replayUrl")
-            }
-          }));
-          setStatusText(Boolean(raw.passed) ? "Sandbox passed" : "Sandbox failed");
-          return;
-        case SERVER_EVENT.SANDBOX_HEALING:
-          setSandbox((current) => ({
-            ...current,
-            active: true,
-            healing: [
-              {
-                id: makeId(),
-                iteration: readNumber(raw, "iteration") || current.healing.length + 1,
-                fixSummary: readString(raw, "fix_summary", "fixSummary")
-              },
-              ...current.healing
-            ]
-          }));
-          setStatusText("Healing sandbox issue");
           return;
         case SERVER_EVENT.EXTENSION_READY: {
           const bundles = (event as { bundles?: GeneratedBundle[] }).bundles || [];
@@ -718,10 +1067,17 @@ export default function App() {
           return;
         case SERVER_EVENT.DONE:
           finalizeAssistant(event.content);
+          setAgentRun((current) => ({ ...current, active: false }));
           setStatusText("Ready");
           return;
         case SERVER_EVENT.ERROR:
           finalizeAssistant();
+          setAgentRun({
+            active: false,
+            phrase: event.message,
+            status: "error",
+            pullRequests: []
+          });
           setMessages((current) => [
             ...current,
             {
@@ -795,8 +1151,13 @@ export default function App() {
     async (query: string, modId?: string) => {
       currentAssistantIdRef.current = null;
       streamAccumRef.current = "";
-      setPlanSteps([]);
-      setPlanAwaitingApproval(false);
+      setAgentRun({
+        active: true,
+        phrase: "Starting agent...",
+        status: "running",
+        pullRequests: []
+      });
+      setTools([]);
       setMessages((current) => [
         ...current,
         {
@@ -865,7 +1226,10 @@ export default function App() {
         const session = stored[SESSION_STORAGE_KEY] as PersistedSession | undefined;
         if (session) {
           if (session.projectId) setProjectId(session.projectId);
-          // Don't restore old messages — each session starts fresh
+          if (session.conversationId) setConversationId(session.conversationId);
+          if (Array.isArray(session.messages) && session.messages.length > 0) {
+            setMessages(session.messages.map((message) => ({ ...message, streaming: false })));
+          }
         }
         hydratedRef.current = true;
       })
@@ -878,12 +1242,12 @@ export default function App() {
     };
   }, []);
 
-  // Persist projectId only — messages always start fresh on reload.
+  // Persist the session on every change once hydration has completed.
   useEffect(() => {
     if (!hydratedRef.current) return;
-    const session: PersistedSession = { projectId, conversationId, messages: [] };
+    const session: PersistedSession = { projectId, conversationId, messages };
     chrome.storage.local.set({ [SESSION_STORAGE_KEY]: session }).catch(captureException);
-  }, [projectId, conversationId]);
+  }, [projectId, conversationId, messages]);
 
   useEffect(() => {
     void getActiveTabs();
@@ -891,6 +1255,79 @@ export default function App() {
       .sendMessage({ type: BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE })
       .catch(captureException);
   }, [getActiveTabs]);
+
+  useEffect(() => {
+    if (!mods.length) {
+      setVisualEditModId("");
+      return;
+    }
+    if (!visualEditModId || !mods.some((mod) => mod.id === visualEditModId)) {
+      setVisualEditModId(mods[0].id);
+    }
+  }, [mods, visualEditModId]);
+
+  useEffect(() => {
+    const listener = (message: RuntimeRequest) => {
+      if (message.type === CONTENT_MESSAGE.VISUAL_EDIT_SELECTION) {
+        setVisualEditDraft(visualDraftFromSelection(message.payload));
+        setVisualEditSession((current) => ({ ...current, selected: message.payload }));
+        setStatusText(message.payload.editable ? "Element selected" : "Element not editable");
+        return false;
+      }
+
+      if (message.type === CONTENT_MESSAGE.VISUAL_EDIT_PREVIEW) {
+        const operation = message.payload.operation;
+        if (operation) {
+          setVisualEditSession((current) => ({
+            ...current,
+            operations: replaceVisualOperation(current.operations, operation),
+            staleOperationIds: message.payload.staleOperationIds || []
+          }));
+          if (operation.type === "setBox") {
+            setVisualEditDraft((current) => ({
+              ...current,
+              x: draftBoxValue(operation.box.x, current.x),
+              y: draftBoxValue(operation.box.y, current.y),
+              width: draftBoxValue(operation.box.width, current.width),
+              height: draftBoxValue(operation.box.height, current.height)
+            }));
+          } else if (operation.type === "setText") {
+            setVisualEditDraft((current) => ({
+              ...current,
+              text: operation.value
+            }));
+          } else if (operation.type === "setStyle" && operation.styles.fontSize) {
+            setVisualEditDraft((current) => ({
+              ...current,
+              fontSize: parseCssNumber(operation.styles.fontSize)
+            }));
+          }
+          return false;
+        }
+        setVisualEditSession((current) => ({
+          ...current,
+          staleOperationIds: message.payload.staleOperationIds || []
+        }));
+        if (message.payload.error) setStatusText("Preview failed");
+        return false;
+      }
+
+      if (message.type === CONTENT_MESSAGE.VISUAL_EDIT_COMMIT) {
+        setVisualEditSession((current) => ({
+          ...current,
+          staleOperationIds: message.payload.staleOperationIds || []
+        }));
+        return false;
+      }
+
+      return false;
+    };
+
+    chrome.runtime.onMessage.addListener(listener);
+    return () => {
+      chrome.runtime.onMessage.removeListener(listener);
+    };
+  }, []);
 
   // Load the mod list and (re)apply every active mod whenever the project changes.
   useEffect(() => {
@@ -919,6 +1356,27 @@ export default function App() {
       <Circle aria-hidden="true" />
     );
 
+  const agentStatusClass = agentRun.active
+    ? "running"
+    : agentRun.status === "exit"
+      ? "passed"
+      : agentRun.status === "error" || agentRun.status === "suspended" || agentRun.phrase.includes("blocked")
+        ? "failed"
+        : "idle";
+
+  const pullRequestLinks = agentRun.pullRequests
+    .map((pullRequest) => pullRequest.pr_url || pullRequest.url || pullRequest.html_url)
+    .filter((url): url is string => Boolean(url));
+
+  const providerLabel =
+    agentRun.provider === "claude"
+      ? "Claude"
+      : agentRun.provider === "nemotron"
+        ? "Nemotron"
+        : agentRun.provider === "devin"
+          ? "Devin"
+          : "Agent";
+
   return (
     <main className="shell">
       <header className="topbar">
@@ -937,6 +1395,33 @@ export default function App() {
         </div>
       </header>
 
+      <section className="project-row" aria-label="Project">
+        <label htmlFor="projectId">Project</label>
+        <input
+          id="projectId"
+          value={projectId}
+          onChange={(event) => setProjectId(event.target.value)}
+          disabled={connectionState === "connected"}
+        />
+        <button type="button" title="Refresh active tabs" onClick={refreshTabs} className="icon-button">
+          <RefreshCcw aria-hidden="true" />
+        </button>
+      </section>
+
+      <section className="tabs-strip" aria-label="Open tabs">
+        {activeTabs.slice(0, 6).map((tab) => (
+          <button
+            key={tab.id}
+            className={`tab-chip ${tab.active ? "active" : ""}`}
+            title={tab.url}
+            type="button"
+          >
+            <span>{tab.active ? "Active" : "Tab"}</span>
+            <strong>{tab.title}</strong>
+          </button>
+        ))}
+      </section>
+
       <VoiceOverlay
         voiceState={voiceState}
         voiceError={voiceError}
@@ -944,8 +1429,6 @@ export default function App() {
         permissionState={permissionState}
         onActivateMic={activateMic}
       />
-
-      {/* Project row and tabs strip hidden — config is internal */}
 
       <section className="chat-log" aria-label="Conversation">
         {messages.map((message) => (
@@ -967,142 +1450,90 @@ export default function App() {
         <div ref={messagesEndRef} />
       </section>
 
-      {planSteps.length > 0 && (
-        <section className="plan-panel" aria-label="Execution plan">
-          <div className="plan-header">
-            <span className="plan-title">Plan</span>
-            <span className="plan-progress">
-              {planSteps.filter((s) => s.status === "done").length}/{planSteps.length}
-            </span>
-          </div>
-          <ol className="plan-steps">
-            {planSteps.map((step) => (
-              <li key={step.id} className={`plan-step plan-step--${step.status}`}>
-                <span className="plan-step-icon" aria-hidden="true">
-                  {step.status === "done" ? "✓" : step.status === "running" ? "▶" : "○"}
-                </span>
-                <span className="plan-step-title">{step.title}</span>
-              </li>
-            ))}
-          </ol>
-          {planAwaitingApproval && (
-            <div className="plan-approval">
-              <button
-                type="button"
-                className="plan-btn plan-btn--approve"
-                onClick={() => {
-                  setPlanAwaitingApproval(false);
-                  void submitChat("Yes, looks good — go ahead and execute the plan.");
-                }}
-              >
-                ✓ Approve
-              </button>
-              <button
-                type="button"
-                className="plan-btn plan-btn--reject"
-                onClick={() => {
-                  setPlanSteps([]);
-                  setPlanAwaitingApproval(false);
-                  void submitChat("No, cancel this plan.");
-                }}
-              >
-                ✕ Reject
-              </button>
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* workbench / sandbox hidden — only shown when there's active output */}
-      {(sandbox.active || sandbox.result) && <section className="workbench" aria-label="Agent work">
-        <div className="panel-section sandbox-panel">
+      <section className="workbench agent-workbench" aria-label="Agent progress">
+        <div className="panel-section agent-panel">
           <div className="section-title">
-            <Wrench aria-hidden="true" />
-            <h2>Sandbox</h2>
+            <Terminal aria-hidden="true" />
+            <h2>{providerLabel}</h2>
           </div>
-          {sandbox.active ? (
-            <div className="status-line running">
+
+          <div className={`status-line ${agentStatusClass}`}>
+            {agentRun.active ? (
               <Loader2 aria-hidden="true" className="spin" />
-              <span>{sandbox.targetUrl || "Browserbase run in progress"}</span>
-            </div>
-          ) : sandbox.result ? (
-            <div className={`status-line ${sandbox.result.passed ? "passed" : "failed"}`}>
-              {sandbox.result.passed ? (
-                <CheckCircle2 aria-hidden="true" />
-              ) : (
-                <AlertTriangle aria-hidden="true" />
-              )}
-              <span>{sandbox.result.passed ? "Passed" : "Needs fixes"}</span>
-            </div>
-          ) : (
-            <p className="empty">Waiting for a sandbox run.</p>
-          )}
+            ) : agentStatusClass === "passed" ? (
+              <CheckCircle2 aria-hidden="true" />
+            ) : agentStatusClass === "failed" ? (
+              <AlertTriangle aria-hidden="true" />
+            ) : (
+              <Circle aria-hidden="true" />
+            )}
+            <span>{agentRun.phrase}</span>
+          </div>
 
-          {sandbox.screenshots[0]?.data || sandbox.screenshots[0]?.url ? (
-            <div className="screenshot-frame">
-              <img
-                src={sandbox.screenshots[0].data || sandbox.screenshots[0].url}
-                alt="Latest sandbox screenshot"
-              />
-            </div>
-          ) : null}
-
-          {sandbox.result?.findings.length ? (
-            <ul className="findings">
-              {sandbox.result.findings.slice(0, 4).map((finding) => (
-                <li key={finding}>{finding}</li>
-              ))}
-            </ul>
-          ) : null}
-
-          {sandbox.result?.replayUrl ? (
-            <a className="replay-link" href={sandbox.result.replayUrl} target="_blank" rel="noreferrer">
+          {agentRun.sessionUrl ? (
+            <a className="replay-link" href={agentRun.sessionUrl} target="_blank" rel="noreferrer">
               <ExternalLink aria-hidden="true" />
-              Replay
+              Agent session
             </a>
           ) : null}
 
-          {sandbox.healing.length ? (
-            <ol className="healing-list">
-              {sandbox.healing.slice(0, 3).map((step) => (
-                <li key={step.id}>
-                  <strong>Iteration {step.iteration}</strong>
-                  <span>{step.fixSummary || "Applying fix"}</span>
+          {pullRequestLinks.length ? (
+            <ol className="agent-links">
+              {pullRequestLinks.map((url, index) => (
+                <li key={url}>
+                  <a href={url} target="_blank" rel="noreferrer">
+                    <ExternalLink aria-hidden="true" />
+                    Pull request {index + 1}
+                  </a>
                 </li>
               ))}
             </ol>
           ) : null}
         </div>
-      </section>}
 
-      <section className={`panel-section mods-panel${modsExpanded ? " expanded" : ""}`} aria-label="Mods">
-        <div className="mods-header">
-          <button
-            type="button"
-            className="mods-toggle"
-            onClick={() => setModsExpanded((v) => !v)}
-            aria-expanded={modsExpanded}
-          >
-            <Puzzle aria-hidden="true" />
-            <span>Mods{mods.length > 0 ? ` (${mods.length})` : ""}</span>
-            {mods.some((m) => m.last_verified && !m.last_verified.passed) && (
-              <span className="mods-badge mods-badge--warn">needs fix</span>
-            )}
-            {mods.length > 0 && mods.every((m) => m.last_verified?.passed) && (
-              <span className="mods-badge mods-badge--ok">all passing</span>
-            )}
-            <span className="mods-chevron">{modsExpanded ? "▲" : "▼"}</span>
-          </button>
+        <div className="panel-section tools-panel">
+          <div className="section-title">
+            <Terminal aria-hidden="true" />
+            <h2>Tools</h2>
+          </div>
+          {tools.length === 0 ? (
+            <p className="empty">No tool calls yet.</p>
+          ) : (
+            <ol className="tool-list">
+              {tools.slice(0, 5).map((tool) => (
+                <li key={tool.id} className={tool.status}>
+                  <span className="tool-icon">
+                    {tool.status === "running" ? (
+                      <Loader2 aria-hidden="true" className="spin" />
+                    ) : (
+                      <CheckCircle2 aria-hidden="true" />
+                    )}
+                  </span>
+                  <span>
+                    <strong>{tool.name}</strong>
+                    {tool.args ? <code>{JSON.stringify(tool.args).slice(0, 120)}</code> : null}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </section>
+
+      <section className="panel-section mods-panel" aria-label="Mods">
+        <div className="section-title">
+          <Puzzle aria-hidden="true" />
+          <h2>Mods ({mods.length})</h2>
           <button
             type="button"
             title="Refresh and re-apply mods"
             onClick={() => void refreshAndApplyMods(projectId)}
-            className="icon-button mods-refresh"
+            className="icon-button"
           >
             <RefreshCcw aria-hidden="true" />
           </button>
         </div>
-        {modsExpanded && (mods.length === 0 ? (
+        {mods.length === 0 ? (
           <p className="empty">No mods yet. Ask Conjure to build one below.</p>
         ) : (
           <ul className="mod-list">
@@ -1177,7 +1608,274 @@ export default function App() {
               );
             })}
           </ul>
-        ))}
+        )}
+      </section>
+
+      <section className="panel-section visual-editor-panel" aria-label="Visual editor">
+        <div className="section-title">
+          <SlidersHorizontal aria-hidden="true" />
+          <h2>Visual edit</h2>
+          <button
+            type="button"
+            title={visualEditSession.active ? "Stop visual edit" : "Start visual edit"}
+            onClick={() => void toggleVisualEdit()}
+            className={`icon-button ${visualEditSession.active ? "active" : ""}`}
+            disabled={!activeTab || !visualEditMod}
+          >
+            <MousePointer2 aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="visual-editor-toolbar">
+          <select
+            value={visualEditMod?.id || ""}
+            onChange={(event) => setVisualEditModId(event.target.value)}
+            disabled={visualEditSession.active || mods.length === 0}
+          >
+            {mods.length === 0 ? <option value="">No mods</option> : null}
+            {mods.map((mod) => (
+              <option key={mod.id} value={mod.id}>
+                {mod.name}
+              </option>
+            ))}
+          </select>
+          <span className={`visual-edit-pill ${visualEditSession.active ? "active" : ""}`}>
+            {visualEditSession.active ? "active" : "idle"}
+          </span>
+          <span className="visual-edit-pill">
+            {visualEditSession.operations.length} edit{visualEditSession.operations.length === 1 ? "" : "s"}
+          </span>
+        </div>
+
+        {visualEditSession.staleOperationIds.length > 0 ? (
+          <div className="visual-stale">
+            <AlertTriangle aria-hidden="true" />
+            <span>{visualEditSession.staleOperationIds.length} stale edit(s)</span>
+          </div>
+        ) : null}
+
+        {selectedVisualEdit ? (
+          <div className="visual-selection">
+            <div className="visual-selection-head">
+              <strong>{selectedVisualEdit.tag}</strong>
+              <span>{Math.round(selectedVisualEdit.rect.width)} x {Math.round(selectedVisualEdit.rect.height)}</span>
+            </div>
+            <code title={selectedVisualEdit.selector}>{selectedVisualEdit.selector}</code>
+            {selectedVisualEdit.ownership.hints.length ? (
+              <p>{selectedVisualEdit.ownership.hints.slice(0, 2).join(" · ")}</p>
+            ) : selectedVisualEdit.ownership.modId || visualEditMod ? (
+              <p>Editing {visualEditMod?.name || selectedVisualEdit.ownership.modId}</p>
+            ) : (
+              <p>No DOM ownership marker</p>
+            )}
+            {!selectedVisualEdit.editable ? (
+              <div className="visual-stale">
+                <AlertTriangle aria-hidden="true" />
+                <span>{selectedVisualEdit.notEditableReason || "Element is not editable"}</span>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="empty">{visualEditSession.active ? "No element selected." : "Visual edit is idle."}</p>
+        )}
+
+        {selectedVisualEdit ? (
+          <div className="visual-controls">
+            <label className="visual-field visual-field-full">
+              <span>Text</span>
+              <textarea
+                value={visualEditDraft.text}
+                onChange={(event) => updateVisualText(event.target.value)}
+                rows={2}
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field color-field">
+              <span>Color</span>
+              <input
+                type="color"
+                value={visualEditDraft.color}
+                onChange={(event) => updateVisualStyle("color", "color", event.target.value)}
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field color-field">
+              <span>Background</span>
+              <input
+                type="color"
+                value={visualEditDraft.backgroundColor}
+                onChange={(event) =>
+                  updateVisualStyle("backgroundColor", "backgroundColor", event.target.value)
+                }
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>Font</span>
+              <input
+                type="number"
+                min="0"
+                value={visualEditDraft.fontSize}
+                onChange={(event) =>
+                  updateVisualStyle(
+                    "fontSize",
+                    "fontSize",
+                    event.target.value,
+                    numericCssValue(event.target.value)
+                  )
+                }
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>Padding</span>
+              <input
+                type="number"
+                min="0"
+                value={visualEditDraft.padding}
+                onChange={(event) =>
+                  updateVisualStyle(
+                    "padding",
+                    "padding",
+                    event.target.value,
+                    numericCssValue(event.target.value)
+                  )
+                }
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>Margin</span>
+              <input
+                type="number"
+                min="0"
+                value={visualEditDraft.margin}
+                onChange={(event) =>
+                  updateVisualStyle(
+                    "margin",
+                    "margin",
+                    event.target.value,
+                    numericCssValue(event.target.value)
+                  )
+                }
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>Radius</span>
+              <input
+                type="number"
+                min="0"
+                value={visualEditDraft.borderRadius}
+                onChange={(event) =>
+                  updateVisualStyle(
+                    "borderRadius",
+                    "borderRadius",
+                    event.target.value,
+                    numericCssValue(event.target.value)
+                  )
+                }
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>X</span>
+              <input
+                type="number"
+                value={visualEditDraft.x}
+                onChange={(event) => updateVisualBox("x", "x", event.target.value)}
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>Y</span>
+              <input
+                type="number"
+                value={visualEditDraft.y}
+                onChange={(event) => updateVisualBox("y", "y", event.target.value)}
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>Width</span>
+              <input
+                type="number"
+                min="0"
+                value={visualEditDraft.width}
+                onChange={(event) => updateVisualBox("width", "width", event.target.value)}
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>Height</span>
+              <input
+                type="number"
+                min="0"
+                value={visualEditDraft.height}
+                onChange={(event) => updateVisualBox("height", "height", event.target.value)}
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-toggle">
+              <input
+                type="checkbox"
+                checked={visualEditDraft.hidden}
+                onChange={(event) => updateVisualHidden(event.target.checked)}
+                disabled={!selectedVisualEdit.editable}
+              />
+              <EyeOff aria-hidden="true" />
+              <span>Hide</span>
+            </label>
+          </div>
+        ) : null}
+
+        <div className="visual-editor-actions">
+          <button
+            type="button"
+            className="icon-button"
+            title="Undo"
+            onClick={() => void undoVisualEdit()}
+            disabled={!visualEditSession.active || visualEditPast.length === 0}
+          >
+            <Undo2 aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            title="Redo"
+            onClick={() => void redoVisualEdit()}
+            disabled={!visualEditSession.active || visualEditFuture.length === 0}
+          >
+            <Redo2 aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="mod-action"
+            onClick={() => void saveVisualEdits()}
+            disabled={!visualEditSession.active || !visualEditMod}
+          >
+            <Save aria-hidden="true" /> Save
+          </button>
+          <button
+            type="button"
+            className="mod-action ghost"
+            onClick={() => void discardVisualEdits()}
+            disabled={!visualEditSession.active}
+          >
+            Discard
+          </button>
+        </div>
       </section>
 
       {rules.length ? (

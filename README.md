@@ -1,6 +1,6 @@
 # conjure
 
-`conjure` is a self-building browser agent. A local Chrome extension gathers browser context and hosts the chat UI; a FastAPI backend uses Claude, Redis, Browserbase, Simular, and Sentry to generate, validate, sandbox-test, and heal generated Chrome extensions before the user installs them.
+`conjure` is a self-building browser agent. A local Chrome extension gathers browser context and hosts the chat UI; a FastAPI backend routes work to the configured coding provider, tracks progress, stores conversation/session state, and reports finished agent session or PR links back to the user.
 
 The architecture source of truth is [MASTER_DESIGN_DOC.md](MASTER_DESIGN_DOC.md).
 
@@ -21,11 +21,14 @@ Create a local env file from the template:
 Copy-Item .env.example .env
 ```
 
-Fill in real values for Anthropic, Redis, Browserbase, Simular, and Sentry in `.env`. Do not commit secrets. The extension reads only `VITE_` values at build time, so do not put private API keys behind `VITE_` names.
+Fill in real values for the selected coding provider, Redis, Browserbase, Simular, and Sentry in `.env`. Do not commit secrets. The extension reads only `VITE_` values at build time, so do not put private API keys behind `VITE_` names.
 
 Required config groups:
 
-- Anthropic: `ANTHROPIC_API_KEY`, primary and secondary Claude model IDs
+- Agent provider: `CONJURE_AGENT_PROVIDER=devin` for Devin cloud sessions, `CONJURE_AGENT_PROVIDER=claude` for the Claude local tool loop, or `CONJURE_AGENT_PROVIDER=nemotron` for the NVIDIA Nemotron local tool loop
+- Devin: `DEVIN_API_KEY`, `DEVIN_ORG_ID`, API base URL, agent mode, repositories, branch, and polling settings
+- Claude: `ANTHROPIC_API_KEY` and `CONJURE_ANTHROPIC_MODEL`
+- Nemotron: `NVIDIA_API_KEY`, `NVIDIA_MODEL`, and optional `NVIDIA_API_BASE_URL` for self-hosted NIM
 - Redis: `REDIS_URL`, `REDIS_NAMESPACE`, sandbox cache TTL
 - Browserbase: API key, project ID, session settings
 - Simular: API key and optional endpoint/model override
@@ -46,7 +49,9 @@ python -m playwright install chromium
 npm run dev:backend
 ```
 
-The backend should read `.env`, connect to Redis, expose the WebSocket contract from the design doc, and keep generated extension code under `demo_code/`.
+The backend should read `.env`, connect to Redis, expose the WebSocket contract from the design doc, and route each Conjure conversation to the selected provider. Demo mode simulates provider progress without external credentials.
+
+Nemotron uses NVIDIA's LangChain `ChatNVIDIA` integration and the same local backend tool loop as Claude. For hosted API Catalog usage, set `CONJURE_AGENT_PROVIDER=nemotron`, `CONJURE_DEMO_MODE=false`, `NVIDIA_API_KEY`, and optionally override `NVIDIA_MODEL`. For local NIM later, set `NVIDIA_API_BASE_URL=http://localhost:8000/v1`.
 
 ## Extension Setup
 
@@ -57,7 +62,7 @@ npm --prefix conjure-extension install
 npm run dev:extension
 ```
 
-For manual Chrome testing, build the extension and load the unpacked output directory from Chrome's Extensions page. Keep model provider keys server-side; the extension should use `VITE_BACKEND_URL` and `VITE_BACKEND_WS_URL` only.
+For manual Chrome testing, build the extension and load the unpacked output directory from Chrome's Extensions page. Keep Devin, Claude, Nemotron, and other provider keys server-side; the extension should use `VITE_BACKEND_URL` and `VITE_BACKEND_WS_URL` only.
 
 ## Dev Commands
 
@@ -90,7 +95,7 @@ When backend and extension implementations arrive, add focused tests under `test
 
 ## Integration Notes
 
-- Redis should hold projects, conversations, memory rules, sandbox result cache entries, and sandbox job streams.
+- Redis should hold projects, conversations, memory rules, Devin session mappings, sandbox result cache entries, and sandbox job streams.
 - Browserbase owns disposable Chrome sessions and replay/screenshot capture.
 - Simular owns autonomous functional, crash, and security passes against the Browserbase session.
 - Sentry should use separate environments or projects for backend, extension, and sandbox crashes.

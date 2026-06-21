@@ -18,7 +18,17 @@ class ScaffoldContractTests(unittest.TestCase):
     def test_env_example_lists_required_runtime_configuration(self) -> None:
         env_example = self.read_root_file(".env.example")
         required_names = [
+            "CONJURE_AGENT_PROVIDER",
+            "DEVIN_API_KEY",
+            "DEVIN_ORG_ID",
+            "DEVIN_API_BASE_URL",
+            "DEVIN_MODE",
+            "DEVIN_REPOS",
             "ANTHROPIC_API_KEY",
+            "CONJURE_ANTHROPIC_MODEL",
+            "NVIDIA_API_KEY",
+            "NVIDIA_MODEL",
+            "NVIDIA_API_BASE_URL",
             "REDIS_URL",
             "BROWSERBASE_API_KEY",
             "BROWSERBASE_PROJECT_ID",
@@ -43,7 +53,7 @@ class ScaffoldContractTests(unittest.TestCase):
             if line and not line.startswith("#") and "=" in line
         ]
         suspicious_value = re.compile(
-            r"(sk-ant-|sk_live_|browserbase_[A-Za-z0-9]{16,}|[A-Za-z0-9_-]{32,})"
+            r"(sk-ant-|sk_live_|cog_[A-Za-z0-9_-]{16,}|browserbase_[A-Za-z0-9]{16,}|[A-Za-z0-9_-]{32,})"
         )
 
         leaked = [value for value in uncommented_values if suspicious_value.search(value)]
@@ -74,6 +84,8 @@ class ScaffoldContractTests(unittest.TestCase):
             "extension setup",
             "dev commands",
             "test commands",
+            "devin",
+            "nemotron",
             "browserbase",
             "simular",
             "sentry",

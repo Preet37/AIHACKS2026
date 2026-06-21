@@ -11,9 +11,8 @@ def run(coro):
 
 
 class MemoryTests(unittest.TestCase):
-    def test_extract_rules_without_anthropic_key_is_safe(self):
+    def test_extract_rules_default_is_safe(self):
         async def scenario():
-            old_key = os.environ.pop("ANTHROPIC_API_KEY", None)
             old_demo = os.environ.pop("CONJURE_MEMORY_DEMO", None)
             try:
                 history = [
@@ -27,8 +26,6 @@ class MemoryTests(unittest.TestCase):
 
                 self.assertEqual(await extract_rules(history, existing_rules=[]), [])
             finally:
-                if old_key is not None:
-                    os.environ["ANTHROPIC_API_KEY"] = old_key
                 if old_demo is not None:
                     os.environ["CONJURE_MEMORY_DEMO"] = old_demo
 
