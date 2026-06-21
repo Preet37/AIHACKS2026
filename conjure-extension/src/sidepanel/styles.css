@@ -35,7 +35,7 @@ button {
 
 .shell {
   display: grid;
-  grid-template-rows: auto auto auto minmax(180px, 1fr) auto auto auto auto;
+  grid-template-rows: auto auto auto auto minmax(180px, 1fr) auto auto auto auto;
   gap: 10px;
   width: 100%;
   height: 100vh;
@@ -447,7 +447,7 @@ h2 {
 
 .composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 40px;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   padding: 8px;
   border-radius: 8px;
@@ -616,4 +616,99 @@ h2 {
   padding: 8px;
   font: inherit;
   margin-bottom: 8px;
+}
+
+/* ── Voice bar ─────────────────────────────────────────── */
+
+.voice-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0 10px;
+  transition: background 0.2s;
+}
+
+.voice-bar--listening {
+  background: #e8f5e9;
+  color: #245a4b;
+  border: 1px solid #a5d6a7;
+}
+
+.voice-bar--transcribing {
+  background: #e3f2fd;
+  color: #1565c0;
+  border: 1px solid #90caf9;
+}
+
+.voice-bar--speaking {
+  background: #fce4ec;
+  color: #880e4f;
+  border: 1px solid #f48fb1;
+}
+
+.voice-bar--error {
+  background: #fcecea;
+  color: #9d2f27;
+  border: 1px solid #f0c8c4;
+}
+
+.voice-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+/* ── Mic button in composer ─────────────────────────────── */
+
+.composer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+  padding: 8px 8px 8px 0;
+}
+
+.mic-button {
+  background: transparent;
+  border: 1px solid #c7d6cd;
+  border-radius: 8px;
+  color: #48574e;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.mic-button:hover {
+  border-color: #4b8c75;
+  background: #edf8f0;
+  color: #245a4b;
+}
+
+.mic-button.mic-active {
+  background: #245a4b;
+  border-color: #245a4b;
+  color: #fff;
+}
+
+.mic-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ── Pulse animation for active voice states ────────────── */
+
+@keyframes voice-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.6; transform: scale(1.15); }
+}
+
+.pulse {
+  animation: voice-pulse 1s ease-in-out infinite;
 }

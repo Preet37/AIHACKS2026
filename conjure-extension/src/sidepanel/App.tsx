@@ -6,16 +6,20 @@ import {
   ExternalLink,
   Loader2,
   MessageSquareText,
+  Mic,
+  MicOff,
   Pencil,
   Puzzle,
   RefreshCcw,
   Send,
   Terminal,
   Trash2,
+  Volume2,
   Wrench,
   XCircle
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVoice } from "./useVoice";
 import {
   createConversationWsUrl,
   createModsBundleUrl,
@@ -245,10 +249,22 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hydratedRef = useRef(false);
   const projectIdRef = useRef(projectId);
+  // Tracks whether the current session was voice-initiated so we know to TTS the reply
+  const voiceInitiatedRef = useRef(false);
+  const lastAssistantContentRef = useRef<string>("");
 
   useEffect(() => {
     projectIdRef.current = projectId;
   }, [projectId]);
+
+  // submitChat is defined later; we forward through a ref so the voice hook
+  // can call it without stale-closure issues.
+  const submitChatRef = useRef<((query: string) => Promise<void>) | null>(null);
+  const handleVoiceTranscript = useCallback((text: string) => {
+    voiceInitiatedRef.current = true;
+    void submitChatRef.current?.(text);
+  }, []);
+  const { voiceState, voiceError, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
 
   const addSystemMessage = useCallback((content: string) => {
     setMessages((current) => [
@@ -367,16 +383,30 @@ export default function App() {
     });
   }, []);
 
-  const finalizeAssistant = useCallback((content?: string) => {
-    setMessages((current) =>
-      current.map((message) =>
-        message.id === currentAssistantIdRef.current
-          ? { ...message, content: content || message.content, streaming: false }
-          : message
-      )
-    );
-    currentAssistantIdRef.current = null;
-  }, []);
+  const finalizeAssistant = useCallback(
+    (content?: string) => {
+      setMessages((current) => {
+        const updated = current.map((message) =>
+          message.id === currentAssistantIdRef.current
+            ? { ...message, content: content || message.content, streaming: false }
+            : message
+        );
+        // Capture final text for TTS
+        const finalMsg = updated.find((m) => m.id === currentAssistantIdRef.current);
+        lastAssistantContentRef.current = finalMsg?.content ?? content ?? "";
+        return updated;
+      });
+      currentAssistantIdRef.current = null;
+
+      // Speak the reply if this turn was voice-initiated
+      if (voiceInitiatedRef.current) {
+        voiceInitiatedRef.current = false;
+        const toSpeak = lastAssistantContentRef.current;
+        if (toSpeak) void speakText(toSpeak.slice(0, 500)); // cap to ~500 chars so TTS isn't too long
+      }
+    },
+    [speakText]
+  );
 
   const getActiveTabs = useCallback(async () => {
     const response = await chrome.runtime.sendMessage({
@@ -729,6 +759,9 @@ export default function App() {
     [addSystemMessage, conversationId, getActiveTabs, openSocket]
   );
 
+  // Keep the ref up-to-date so the voice handler always calls the latest version
+  submitChatRef.current = submitChat;
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     const query = input.trim();
@@ -837,6 +870,35 @@ export default function App() {
           <span>{connectionState}</span>
         </div>
       </header>
+
+      {voiceState !== "idle" || voiceError ? (
+        <div className={`voice-bar voice-bar--${voiceError ? "error" : voiceState}`} aria-live="polite">
+          {voiceState === "listening" && (
+            <>
+              <Mic aria-hidden="true" className="voice-icon pulse" />
+              <span>Listening… release Alt to send</span>
+            </>
+          )}
+          {voiceState === "transcribing" && (
+            <>
+              <Loader2 aria-hidden="true" className="spin voice-icon" />
+              <span>Transcribing…</span>
+            </>
+          )}
+          {voiceState === "speaking" && (
+            <>
+              <Volume2 aria-hidden="true" className="voice-icon pulse" />
+              <span>Speaking…</span>
+            </>
+          )}
+          {voiceError && (
+            <>
+              <MicOff aria-hidden="true" className="voice-icon" />
+              <span>{voiceError}</span>
+            </>
+          )}
+        </div>
+      ) : null}
 
       <section className="project-row" aria-label="Project">
         <label htmlFor="projectId">Project</label>
@@ -1071,12 +1133,36 @@ export default function App() {
         <textarea
           value={input}
           onChange={(event) => setInput(event.target.value)}
-          placeholder="Ask conjure to build a browser customization..."
+          placeholder="Ask conjure to build a browser customization…"
           rows={3}
         />
-        <button type="submit" title="Send message" className="send-button" disabled={!input.trim()}>
-          <Send aria-hidden="true" />
-        </button>
+        <div className="composer-actions">
+          <button
+            type="button"
+            title={
+              voiceState === "listening"
+                ? "Release Alt to send"
+                : voiceState === "transcribing"
+                  ? "Transcribing…"
+                  : "Hold Alt / Option to speak"
+            }
+            className={`mic-button icon-button ${voiceState !== "idle" ? "mic-active" : ""}`}
+            aria-pressed={voiceState === "listening"}
+          >
+            {voiceState === "listening" ? (
+              <Mic aria-hidden="true" className="pulse" />
+            ) : voiceState === "transcribing" ? (
+              <Loader2 aria-hidden="true" className="spin" />
+            ) : voiceState === "speaking" ? (
+              <Volume2 aria-hidden="true" />
+            ) : (
+              <Mic aria-hidden="true" />
+            )}
+          </button>
+          <button type="submit" title="Send message" className="send-button" disabled={!input.trim()}>
+            <Send aria-hidden="true" />
+          </button>
+        </div>
       </form>
     </main>
   );

@@ -5,10 +5,12 @@ import contextlib
 import uuid
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
 from .utils import mods as mods_registry
+from .utils import voice as voice_utils
 from .utils.agent import ConjureAgent
 from .utils.config import load_settings
 from .utils.memory import extract_and_save_rules
@@ -31,6 +33,31 @@ app.add_middleware(
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "conjure-backend"}
+
+
+@app.post("/voice/transcribe")
+async def voice_transcribe(request: Request) -> dict[str, str]:
+    """Accept raw audio from the extension and return a Deepgram transcript."""
+    audio = await request.body()
+    content_type = request.headers.get("content-type", "audio/webm")
+    try:
+        transcript = await voice_utils.transcribe_audio(audio, content_type)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"transcript": transcript}
+
+
+@app.post("/voice/speak")
+async def voice_speak(body: dict[str, str]) -> Response:
+    """Convert assistant reply text to MP3 via Deepgram Aura TTS."""
+    text = body.get("text", "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="text is required")
+    try:
+        audio_bytes = await voice_utils.speak_text(text)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return Response(content=audio_bytes, media_type="audio/mpeg")
 
 
 @app.get("/projects/{project_id}/mods")
