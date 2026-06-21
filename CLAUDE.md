@@ -60,8 +60,13 @@ title link + price + note) come back, plus a **replay link to watch it**.
 - ✅ Tests: `test_browser_agent.py` + rewritten `test_agent_task_endpoint.py` → **64 pass**.
 - ✅ Docs: README / HOW_TO_RUN §12 / `.env.example` updated to off-device.
 - ✅ Branch pushed to origin; `DELEGATED.md` = extension track for the parallel agent.
-- ⏳ REMAINING: the **extension** (DELEGATED.md) — cookies permission, send `{task,url,cookies}`,
-  render replay link. Then full E2E (extension → backend → Browserbase) + commit.
+- ✅ Extension track DONE — merged from `origin/codex/multi-website-mods`: cookies
+  permission, `runAgentTask` sends `{task,url,cookies}`, replay link, `session_id`/`replay_url`
+  types. Contract matches the backend. Typecheck clean.
+- ✅ ALSO merged: **multi-site mods** (carry/apply mods across sites) — `mods.py`,
+  `prompts.py`, `tools.py`, `background.ts`, current-tab scoping (`getCurrentTab`,
+  `GET_CURRENT_TAB`), `ModRecord.websites/matches` + per-site verify. **67 tests pass.**
+- ⏳ REMAINING: full E2E (build+load extension → backend → Browserbase live) and open a PR.
 - Note: `agentspan_finder.py` kept as an alternate engine (no longer wired to the endpoint).
 
 ## BUILD PLAN / TODO (history — mostly done, see STATUS)
