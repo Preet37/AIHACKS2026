@@ -357,6 +357,7 @@ export default function App() {
       try {
         const response = await chrome.runtime.sendMessage({
           type: BACKGROUND_MESSAGE.APPLY_MODS,
+          projectId: projectIdRef.current,
           bundles
         });
         if (isRuntimeOk<ApplyModsResult>(response)) {
