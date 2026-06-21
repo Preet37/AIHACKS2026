@@ -50,6 +50,8 @@ import {
 } from "./surfaceContext";
 import { RightPanel } from "./surfaces/RightPanel";
 import { Composer } from "./surfaces/Composer";
+import { useFinder, isFindRequest } from "./useFinder";
+import { useBackendHealth } from "./useBackendHealth";
 
 const SESSION_STORAGE_KEY = "conjure.session";
 
@@ -403,6 +405,15 @@ export default function App() {
     );
   }, []);
 
+  // When a run ends, any in-flight "running" trace entries (e.g. repeated
+  // "devin status" polls) must stop pulsing — otherwise the trace looks stuck
+  // even though the run has completed.
+  const settleRunningTrace = useCallback((status: "done" | "failed") => {
+    setTraceEntries((current) =>
+      current.map((entry) => (entry.status === "running" ? { ...entry, status } : entry))
+    );
+  }, []);
+
   const toggleUiSetting = useCallback((key: keyof typeof uiSettings) => {
     setUiSettings((current) => {
       const value = current[key];
@@ -491,6 +502,13 @@ export default function App() {
   );
 
   const activeTab = useMemo(() => activeTabs.find((tab) => tab.active) || activeTabs[0], [activeTabs]);
+
+  // "Find on this page" off-device browser agent. Owns its own state machine;
+  // App only routes find-shaped commands to it (see handleSubmit below).
+  const finder = useFinder(captureException);
+
+  // Proactive backend reachability (GET /health), shown in the status bar.
+  const backendHealth = useBackendHealth();
 
   const sendToServer = useCallback((payload: ClientToServerEvent) => {
     const socket = socketRef.current;
@@ -854,6 +872,7 @@ export default function App() {
         case SERVER_EVENT.DONE:
           finalizeAssistant(event.content);
           setAgentRun((current) => ({ ...current, active: false }));
+          settleRunningTrace("done");
           appendTrace({
             label: "run complete",
             detail: event.content ? event.content.slice(0, 180) : "assistant finished",
@@ -878,6 +897,7 @@ export default function App() {
               createdAt: Date.now()
             }
           ]);
+          settleRunningTrace("failed");
           appendTrace({
             label: "run error",
             detail: event.message,
@@ -896,7 +916,8 @@ export default function App() {
       finalizeAssistant,
       handleRequestConsoleLogs,
       handleRequestTabContent,
-      openTraceTab
+      openTraceTab,
+      settleRunningTrace
     ]
   );
 
@@ -1006,6 +1027,13 @@ export default function App() {
     const query = input.trim();
     if (!query) return;
     setInput("");
+    // Find-shaped prompts go to the off-device browser agent, not the chat/build flow.
+    if (isFindRequest(query)) {
+      setMode("home");
+      void finder.run(query, { url: activeTab?.url, projectId: projectIdRef.current });
+      return;
+    }
+    finder.clear();
     await submitChat(query);
   };
 
@@ -1013,6 +1041,12 @@ export default function App() {
     const command = query.trim();
     if (!command) return;
     setInput("");
+    if (isFindRequest(command)) {
+      setMode("home");
+      void finder.run(command, { url: activeTab?.url, projectId: projectIdRef.current });
+      return;
+    }
+    finder.clear();
     await submitChat(command);
   };
 
@@ -1273,6 +1307,7 @@ export default function App() {
     refreshCommandShortcuts,
     openShortcutSettings,
     testCommandOverlay,
+    finder,
     input,
     setInput,
     handleSubmit,
@@ -1302,6 +1337,14 @@ export default function App() {
             onBrand={() => void requestCommandBar()}
             right={
               <>
+                <span className={`cj-statusbar__health cj-statusbar__health--${backendHealth}`} title={`Backend: ${backendHealth}`}>
+                  <StatusBlock
+                    state={backendHealth === "online" ? "active" : backendHealth === "checking" ? "done" : "pending"}
+                    pulse={backendHealth === "checking"}
+                    label={`Backend: ${backendHealth}`}
+                  />
+                  <span>{backendHealth === "online" ? "backend" : `backend ${backendHealth}`}</span>
+                </span>
                 <StatusBlock
                   state={connectionStatusState}
                   pulse={connectionState === "connecting"}

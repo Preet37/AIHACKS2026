@@ -122,7 +122,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  max-width: 160px;
+  max-width: 240px;
   overflow: hidden;
   white-space: nowrap;
 }
@@ -130,6 +130,23 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.cj-statusbar__health {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--cj-font-mono);
+  color: var(--cj-dim);
+}
+.cj-statusbar__health--online {
+  color: var(--cj-accent-bright);
+}
+.cj-statusbar__health--checking {
+  color: var(--cj-dim);
+}
+.cj-statusbar__health--offline {
+  color: #ff7a7a;
 }
 
 /* ── Pane (§6) ─────────────────────────────────────────────────────────── */

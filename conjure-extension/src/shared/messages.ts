@@ -503,6 +503,25 @@ export interface AgentPullRequest {
   title?: string;
 }
 
+/** One item the off-device cloud browser agent found from the current page. */
+export interface AgentFinding {
+  title: string;
+  url: string;
+  image?: string;
+  price?: string;
+  note?: string;
+}
+
+/** Response body from POST /projects/{id}/agent-task. */
+export interface AgentTaskResponse {
+  project_id: string;
+  task: string;
+  url: string;
+  findings: AgentFinding[];
+  session_id?: string;
+  replay_url?: string;
+}
+
 export type AgentProvider = "groq" | "claude" | "nemotron";
 
 export type ServerToClientEvent =

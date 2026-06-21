@@ -4,9 +4,10 @@
 // (composing §6 primitives) without 100-line prop drilling.
 import { createContext, useContext, type Dispatch, type FormEvent, type RefObject, type SetStateAction } from "react";
 import type { ActiveTabSnapshot, AgentProvider, AgentPullRequest, CommandShortcutInfo, ModRecord } from "../shared/messages";
+import type { FinderSlice } from "./useFinder";
 
 export type PanelMode = "home" | "planning" | "design" | "trace" | "settings";
-export type WorkMode = "planning" | "coding";
+export type WorkMode = "planning" | "coding" | "direct";
 export type TraceStatus = "running" | "done" | "failed" | "pending";
 export type ConnectionState = "idle" | "connecting" | "connected" | "error";
 export type ChatRole = "user" | "assistant" | "system";
@@ -125,6 +126,9 @@ export interface SurfaceContextValue {
   refreshCommandShortcuts: () => void;
   openShortcutSettings: () => void;
   testCommandOverlay: () => void;
+
+  // finder ("find on this page" off-device browser agent)
+  finder: FinderSlice;
 
   // command bar / palette
   input: string;

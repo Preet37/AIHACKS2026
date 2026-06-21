@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import { Button, Pane, StatusBlock, Window } from "../components";
 import { formatTime } from "../lib/format";
 import { useSurface } from "../surfaceContext";
+import { FindingsPanel } from "./FindingsPanel";
 import "./HomePanel.css";
 
 export function HomePanel() {
@@ -33,6 +34,8 @@ export function HomePanel() {
 
   return (
     <div className="hp-stack">
+      <FindingsPanel />
+
       <Pane
         name="MODS"
         ariaLabel="Mods"

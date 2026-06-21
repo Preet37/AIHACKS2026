@@ -59,6 +59,16 @@ class Settings:
     max_read_lines: int = 250
     grep_max_matches: int = 50
     max_agent_iterations: int = 25
+    # Off-device browser agent ("find on this page" finder + agent actions).
+    browserbase_api_key: str | None = None
+    browserbase_project_id: str | None = None
+    browse_model: str = "anthropic/claude-sonnet-4-6"
+    browse_max_results: int = 6
+    browse_max_steps: int = 6
+    browserbase_session_region: str | None = None
+    browse_use_proxies: bool = True
+    browse_verified: bool = False
+    browse_advanced_stealth: bool = False
 
     @property
     def effective_demo_mode(self) -> bool:
@@ -89,4 +99,13 @@ def load_settings() -> Settings:
         max_read_lines=_env_int("CONJURE_MAX_READ_LINES", 250),
         grep_max_matches=_env_int("CONJURE_GREP_MAX_MATCHES", 50),
         max_agent_iterations=_env_int("CONJURE_MAX_AGENT_ITERATIONS", 25),
+        browserbase_api_key=os.getenv("BROWSERBASE_API_KEY"),
+        browserbase_project_id=os.getenv("BROWSERBASE_PROJECT_ID"),
+        browse_model=os.getenv("BROWSE_MODEL", "anthropic/claude-sonnet-4-6"),
+        browse_max_results=_env_int("BROWSE_MAX_RESULTS", 6),
+        browse_max_steps=_env_int("BROWSE_MAX_STEPS", 6),
+        browserbase_session_region=os.getenv("BROWSERBASE_SESSION_REGION") or None,
+        browse_use_proxies=_env_bool("BROWSE_USE_PROXIES", True),
+        browse_verified=_env_bool("BROWSE_VERIFIED", False),
+        browse_advanced_stealth=_env_bool("BROWSE_ADVANCED_STEALTH", False),
     )

@@ -123,6 +123,14 @@ export const createStaticSurfaceValue = ({
     refreshCommandShortcuts: noop,
     openShortcutSettings: noop,
     testCommandOverlay: noop,
+    finder: {
+      status: "idle",
+      findings: [],
+      error: null,
+      replayUrl: undefined,
+      run: async () => {},
+      clear: noop
+    },
     input: "",
     setInput: noop,
     handleSubmit: noop as (event: FormEvent) => void,
