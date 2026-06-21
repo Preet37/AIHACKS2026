@@ -1,17 +1,13 @@
 /**
  * Wispr-style voice loop.
  *
- * Hold  Alt/Option  → push-to-talk (PTT): records while held, sends on release.
- * Double-tap Alt    → lock mode: mic stays open; tap Alt once more to stop + send.
- *
- * Exposes per-bar frequency amplitudes (0–1) via a Float32Array so the UI can
- * render a live spectrum waveform without polling.
+ * Hold Alt/Option  → PTT: records while held, sends on release.
+ * Double-tap Alt   → lock mode: tap Alt once more to stop + send.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CONJURE_CONFIG } from "../shared/config";
 
 export type VoiceState = "idle" | "listening" | "locked" | "transcribing" | "speaking";
-
 export const VOICE_BAR_COUNT = 20;
 
 export interface UseVoiceOptions {
@@ -21,7 +17,6 @@ export interface UseVoiceOptions {
 export interface UseVoiceReturn {
   voiceState: VoiceState;
   voiceError: string | null;
-  /** Per-bar frequency magnitudes (0–1), length = VOICE_BAR_COUNT, updates ~60fps while listening/locked */
   barAmplitudes: number[];
   permissionState: PermissionState | null;
   requestPermission: () => Promise<void>;
@@ -40,13 +35,14 @@ function bestMimeType(): string {
   return "";
 }
 
-/** ms window for second keydown to count as double-tap */
 const DOUBLE_TAP_MS = 350;
 
 export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
-  const [barAmplitudes, setBarAmplitudes] = useState<number[]>(() => Array(VOICE_BAR_COUNT).fill(0));
+  const [barAmplitudes, setBarAmplitudes] = useState<number[]>(() =>
+    Array(VOICE_BAR_COUNT).fill(0)
+  );
   const [permissionState, setPermissionState] = useState<PermissionState | null>(null);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -58,27 +54,23 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
 
   const isHoldingRef = useRef(false);
   const isLockedRef = useRef(false);
-  /** Timer set on keyup; cancelled if a second keydown arrives quickly (double-tap) */
   const pttTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** True while a PTT-release timer is pending so we know the mic is still open */
   const pendingReleaseRef = useRef(false);
 
-  // ── Amplitude / spectrum loop ─────────────────────────────────────────────
+  // ── Amplitude loop ────────────────────────────────────────────────────────
 
   const startAmplitudeLoop = useCallback(() => {
     const analyser = analyserRef.current;
     if (!analyser) return;
     const buf = new Uint8Array(analyser.frequencyBinCount);
-
     const tick = () => {
       analyser.getByteFrequencyData(buf);
-      // Map frequency bins → VOICE_BAR_COUNT bars (emphasise lower-mid for voice)
-      const usableBins = Math.floor(buf.length * 0.5); // 0–50% of spectrum covers speech
-      const step = Math.max(1, Math.floor(usableBins / VOICE_BAR_COUNT));
+      const usable = Math.floor(buf.length * 0.5);
+      const step = Math.max(1, Math.floor(usable / VOICE_BAR_COUNT));
       const vals = Array.from({ length: VOICE_BAR_COUNT }, (_, i) => {
         let sum = 0;
         for (let j = 0; j < step; j++) sum += buf[i * step + j];
-        return Math.min(1, (sum / step / 255) * 2.5); // amplify a bit
+        return Math.min(1, (sum / step / 255) * 2.5);
       });
       setBarAmplitudes(vals);
       animFrameRef.current = requestAnimationFrame(tick);
@@ -110,11 +102,13 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
   const openMic = useCallback(async (): Promise<boolean> => {
     setVoiceError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       streamRef.current = stream;
       setPermissionState("granted");
 
+      // AudioContext may be suspended in extension context — resume it
       const ctx = new AudioContext();
+      if (ctx.state === "suspended") await ctx.resume();
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 512;
@@ -125,17 +119,19 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
 
       const mimeType = bestMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      recorderRef.current = recorder;
       chunksRef.current = [];
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
+      recorder.onerror = (e) => console.error("[voice] recorder error", e);
       recorder.start(100);
+      recorderRef.current = recorder;
       startAmplitudeLoop();
       return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("Permission denied") || msg.includes("NotAllowed")) {
+      console.error("[voice] openMic failed:", msg);
+      if (msg.includes("Permission denied") || msg.includes("NotAllowed") || msg.includes("NotFoundError")) {
         setVoiceError("blocked");
         setPermissionState("denied");
       } else {
@@ -150,50 +146,75 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
 
   const closeMicAndTranscribe = useCallback(async () => {
     const recorder = recorderRef.current;
+    stopAmplitudeLoop();
+
     if (!recorder || recorder.state === "inactive") {
+      console.warn("[voice] recorder not active, aborting transcription");
       stopStream();
       setVoiceState("idle");
       return;
     }
 
     setVoiceState("transcribing");
-    stopAmplitudeLoop();
 
+    // Flush remaining audio and wait for onstop
     await new Promise<void>((resolve) => {
       recorder.onstop = () => resolve();
+      recorder.requestData(); // flush any buffered chunk
       recorder.stop();
     });
 
     const mimeType = recorder.mimeType || "audio/webm";
-    const blob = new Blob(chunksRef.current, { type: mimeType });
-    chunksRef.current = [];
+    const chunks = chunksRef.current.splice(0);
     stopStream();
+    recorderRef.current = null;
 
-    if (blob.size < 2000) {
+    if (chunks.length === 0) {
+      console.warn("[voice] no audio chunks captured — mic may not be working");
+      setVoiceError("No audio captured. Check mic permissions and try again.");
+      setVoiceState("idle");
+      return;
+    }
+
+    const blob = new Blob(chunks, { type: mimeType });
+    console.log(`[voice] sending ${blob.size} bytes (${mimeType}) to backend`);
+
+    if (blob.size < 200) {
+      console.warn("[voice] blob too small:", blob.size);
+      setVoiceError("Recording too short — speak closer to your mic.");
       setVoiceState("idle");
       return;
     }
 
     try {
-      const response = await fetch(`${CONJURE_CONFIG.backendUrl}/voice/transcribe`, {
+      const url = `${CONJURE_CONFIG.backendUrl}/voice/transcribe`;
+      console.log("[voice] POST", url);
+      const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": mimeType },
         body: blob,
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null) as { detail?: string } | null;
-        throw new Error(body?.detail ?? `Transcription failed (${response.status})`);
+        throw new Error(body?.detail ?? `HTTP ${response.status}`);
       }
-      const { transcript } = await response.json() as { transcript: string };
-      if (transcript.trim()) onTranscript(transcript.trim());
+      const data = await response.json() as { transcript: string };
+      console.log("[voice] transcript:", data.transcript);
+      if (data.transcript.trim()) {
+        onTranscript(data.transcript.trim());
+      } else {
+        setVoiceError("Couldn't hear anything — try speaking louder.");
+      }
     } catch (err) {
-      setVoiceError(err instanceof Error ? err.message : "Transcription error");
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[voice] transcription error:", msg);
+      setVoiceError(`Transcription failed: ${msg}`);
     } finally {
       setVoiceState("idle");
     }
   }, [onTranscript, stopAmplitudeLoop, stopStream]);
 
-  // ── Request permission explicitly (from UI button) ───────────────────────
+  // ── Request permission (from UI) ──────────────────────────────────────────
 
   const requestPermission = useCallback(async () => {
     setVoiceError(null);
@@ -207,7 +228,7 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
     }
   }, []);
 
-  // ── TTS speak-back ────────────────────────────────────────────────────────
+  // ── TTS ───────────────────────────────────────────────────────────────────
 
   const speakText = useCallback(async (text: string) => {
     if (!text.trim()) return;
@@ -227,17 +248,15 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
         audio.onerror = () => resolve();
         void audio.play();
       });
-    } catch {
-      // TTS is best-effort; don't surface errors
+    } catch (err) {
+      console.error("[voice] TTS error:", err);
     } finally {
       setVoiceState("idle");
     }
   }, []);
 
-  // ── Keyboard handlers ─────────────────────────────────────────────────────
+  // ── Keyboard handler (stable — uses refs, no state deps) ──────────────────
 
-  // Use refs for the callbacks so the effect doesn't need to re-register on
-  // every voiceState change (avoids stale-closure issues).
   const closeMicRef = useRef(closeMicAndTranscribe);
   const openMicRef = useRef(openMic);
   useEffect(() => { closeMicRef.current = closeMicAndTranscribe; }, [closeMicAndTranscribe]);
@@ -248,7 +267,7 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
       if (e.key !== "Alt" || e.ctrlKey || e.metaKey || e.shiftKey || e.repeat) return;
       e.preventDefault();
 
-      // ── If locked → stop and transcribe ──
+      // Locked → single tap stops + transcribes
       if (isLockedRef.current) {
         isLockedRef.current = false;
         isHoldingRef.current = false;
@@ -258,7 +277,7 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
         return;
       }
 
-      // ── Second tap while PTT-release timer is pending → enter lock mode ──
+      // Second tap while PTT-release timer is pending → lock mode
       if (pendingReleaseRef.current && pttTimerRef.current !== null) {
         clearTimeout(pttTimerRef.current);
         pttTimerRef.current = null;
@@ -269,8 +288,7 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
         return;
       }
 
-      // ── First tap: start listening ──
-      if (isHoldingRef.current) return; // guard against extra events
+      if (isHoldingRef.current) return;
       isHoldingRef.current = true;
       const ok = await openMicRef.current();
       if (ok) setVoiceState("listening");
@@ -279,12 +297,10 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key !== "Alt") return;
       e.preventDefault();
-
       if (!isHoldingRef.current || isLockedRef.current) return;
       isHoldingRef.current = false;
       pendingReleaseRef.current = true;
 
-      // Wait briefly: if a second keydown comes before the timer fires it's a double-tap
       pttTimerRef.current = setTimeout(async () => {
         pttTimerRef.current = null;
         pendingReleaseRef.current = false;
@@ -300,21 +316,21 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, []); // stable — no state deps needed thanks to refs
+  }, []);
 
   // ── Initial permission check ──────────────────────────────────────────────
 
   useEffect(() => {
     navigator.permissions
       .query({ name: "microphone" as PermissionName })
-      .then((result) => {
-        setPermissionState(result.state);
-        result.onchange = () => setPermissionState(result.state);
+      .then((r) => {
+        setPermissionState(r.state);
+        r.onchange = () => setPermissionState(r.state);
       })
       .catch(() => {});
   }, []);
 
-  // ── Cleanup on unmount ────────────────────────────────────────────────────
+  // ── Cleanup ───────────────────────────────────────────────────────────────
 
   useEffect(() => () => {
     if (pttTimerRef.current) clearTimeout(pttTimerRef.current);

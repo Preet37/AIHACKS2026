@@ -73,6 +73,12 @@ interface ToolRun {
   endedAt?: number;
 }
 
+interface PlanStep {
+  id: string;
+  title: string;
+  status: "pending" | "running" | "done";
+}
+
 interface SandboxScreenshot {
   id: string;
   url?: string;
@@ -241,6 +247,8 @@ export default function App() {
   const [mods, setMods] = useState<ModRecord[]>([]);
   const [editingMod, setEditingMod] = useState<{ id: string; prompt: string } | null>(null);
   const [rules, setRules] = useState<string[]>([]);
+  const [modsExpanded, setModsExpanded] = useState(false);
+  const [planSteps, setPlanSteps] = useState<PlanStep[]>([]);
   const [statusText, setStatusText] = useState("Ready");
 
   const socketRef = useRef<WebSocket | null>(null);
@@ -549,10 +557,33 @@ export default function App() {
         case SERVER_EVENT.CONVERSATION_ID:
           setConversationId(event.conversation_id);
           return;
-        case SERVER_EVENT.CONTENT:
+        case SERVER_EVENT.CONTENT: {
           appendAssistantContent(event.content);
+          // Parse plan steps from "**Plan:**\n- [ ] N. title — why" pattern
+          setMessages((current) => {
+            const msg = current.find((m) => m.id === currentAssistantIdRef.current);
+            if (!msg) return current;
+            const full = msg.content + (event.content as string);
+            const planBlock = /\*\*Plan:\*\*\n((?:- \[[ x]\].*\n?)+)/i.exec(full);
+            if (planBlock) {
+              const steps: PlanStep[] = [];
+              for (const line of planBlock[1].split("\n")) {
+                const m = /- \[[ x]\]\s+(\d+)\.\s+([^—–-]+)/.exec(line);
+                if (m) steps.push({ id: m[1], title: m[2].trim(), status: "pending" });
+              }
+              if (steps.length > 0) setPlanSteps(steps);
+            }
+            return current;
+          });
           return;
+        }
         case SERVER_EVENT.TOOL_START:
+          // Advance plan: mark the first pending step as running when tools start
+          setPlanSteps((steps) => {
+            const idx = steps.findIndex((s) => s.status === "pending");
+            if (idx === -1) return steps;
+            return steps.map((s, i) => i === idx ? { ...s, status: "running" } : s);
+          });
           setTools((current) => [
             {
               id: `${event.name}-${Date.now()}`,
@@ -566,6 +597,12 @@ export default function App() {
           setStatusText(`Running ${event.name}`);
           return;
         case SERVER_EVENT.TOOL_END:
+          // Advance plan: mark the running step as done
+          setPlanSteps((steps) => {
+            const idx = steps.findIndex((s) => s.status === "running");
+            if (idx === -1) return steps;
+            return steps.map((s, i) => i === idx ? { ...s, status: "done" } : s);
+          });
           setTools((current) => {
             const index = current.findIndex((tool) => tool.name === event.name && tool.status === "running");
             if (index === -1) return current;
@@ -728,6 +765,7 @@ export default function App() {
   const submitChat = useCallback(
     async (query: string, modId?: string) => {
       currentAssistantIdRef.current = null;
+      setPlanSteps([]); // clear previous plan on new turn
       setMessages((current) => [
         ...current,
         {
@@ -892,7 +930,29 @@ export default function App() {
         <div ref={messagesEndRef} />
       </section>
 
-      <section className="workbench" aria-label="Agent work">
+      {planSteps.length > 0 && (
+        <section className="plan-panel" aria-label="Execution plan">
+          <div className="plan-header">
+            <span className="plan-title">Plan</span>
+            <span className="plan-progress">
+              {planSteps.filter((s) => s.status === "done").length}/{planSteps.length}
+            </span>
+          </div>
+          <ol className="plan-steps">
+            {planSteps.map((step) => (
+              <li key={step.id} className={`plan-step plan-step--${step.status}`}>
+                <span className="plan-step-icon" aria-hidden="true">
+                  {step.status === "done" ? "✓" : step.status === "running" ? "▶" : "○"}
+                </span>
+                <span className="plan-step-title">{step.title}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      {/* workbench / sandbox hidden — only shown when there's active output */}
+      {(sandbox.active || sandbox.result) && <section className="workbench" aria-label="Agent work">
         <div className="panel-section sandbox-panel">
           <div className="section-title">
             <Wrench aria-hidden="true" />
@@ -951,22 +1011,34 @@ export default function App() {
             </ol>
           ) : null}
         </div>
-      </section>
+      </section>}
 
-      <section className="panel-section mods-panel" aria-label="Mods">
-        <div className="section-title">
+      <section className={`panel-section mods-panel${modsExpanded ? " expanded" : ""}`} aria-label="Mods">
+        <button
+          type="button"
+          className="mods-header"
+          onClick={() => setModsExpanded((v) => !v)}
+          aria-expanded={modsExpanded}
+        >
           <Puzzle aria-hidden="true" />
-          <h2>Mods ({mods.length})</h2>
+          <span>Mods{mods.length > 0 ? ` (${mods.length})` : ""}</span>
+          {mods.some((m) => m.last_verified && !m.last_verified.passed) && (
+            <span className="mods-badge mods-badge--warn">needs fix</span>
+          )}
+          {mods.length > 0 && mods.every((m) => m.last_verified?.passed) && (
+            <span className="mods-badge mods-badge--ok">all passing</span>
+          )}
+          <span className="mods-chevron">{modsExpanded ? "▲" : "▼"}</span>
           <button
             type="button"
             title="Refresh and re-apply mods"
-            onClick={() => void refreshAndApplyMods(projectId)}
-            className="icon-button"
+            onClick={(e) => { e.stopPropagation(); void refreshAndApplyMods(projectId); }}
+            className="icon-button mods-refresh"
           >
             <RefreshCcw aria-hidden="true" />
           </button>
-        </div>
-        {mods.length === 0 ? (
+        </button>
+        {modsExpanded && (mods.length === 0 ? (
           <p className="empty">No mods yet. Ask Conjure to build one below.</p>
         ) : (
           <ul className="mod-list">
@@ -1041,7 +1113,7 @@ export default function App() {
               );
             })}
           </ul>
-        )}
+        ))}
       </section>
 
       {rules.length ? (

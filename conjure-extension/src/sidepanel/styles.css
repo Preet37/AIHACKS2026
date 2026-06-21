@@ -499,7 +499,62 @@ h2 {
   }
 }
 
-/* Mods panel */
+/* ── Mods panel (collapsible) ───────────────────────────── */
+
+.mods-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.mods-header svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  color: #48574e;
+}
+
+.mods-header > span:first-of-type {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mods-chevron {
+  font-size: 9px;
+  color: #8fa89b;
+  margin-left: 2px;
+}
+
+.mods-refresh {
+  margin-left: auto;
+}
+
+.mods-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border-radius: 100px;
+}
+
+.mods-badge--warn {
+  background: #fce4ec;
+  color: #880e4f;
+}
+
+.mods-badge--ok {
+  background: #e8f5e9;
+  color: #1b5e20;
+}
+
 .mods-panel .section-title {
   display: flex;
   align-items: center;
@@ -508,6 +563,83 @@ h2 {
 
 .mods-panel .section-title .icon-button {
   margin-left: auto;
+}
+
+/* ── Plan checklist panel ───────────────────────────────── */
+
+.plan-panel {
+  background: #f3f7ff;
+  border: 1px solid #c5d5f5;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin: 0 10px;
+  animation: vo-enter 0.2s ease;
+}
+
+.plan-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.plan-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #3a5bbf;
+}
+
+.plan-progress {
+  font-size: 11px;
+  color: #5577cc;
+  font-weight: 600;
+}
+
+.plan-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.plan-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  transition: opacity 0.2s;
+}
+
+.plan-step--pending {
+  opacity: 0.55;
+}
+
+.plan-step--running {
+  opacity: 1;
+  color: #1a3aa0;
+  font-weight: 600;
+}
+
+.plan-step--done {
+  opacity: 0.65;
+  text-decoration: line-through;
+  text-decoration-color: #7a9be0;
+}
+
+.plan-step-icon {
+  font-size: 11px;
+  width: 14px;
+  text-align: center;
+  flex: 0 0 auto;
+  color: #3a5bbf;
+}
+
+.plan-step--running .plan-step-icon {
+  animation: vo-enter 0.5s ease infinite alternate;
 }
 
 .mod-list {
