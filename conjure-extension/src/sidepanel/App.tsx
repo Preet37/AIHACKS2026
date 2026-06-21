@@ -234,6 +234,7 @@ export default function App() {
   const [findings, setFindings] = useState<AgentFinding[]>([]);
   const [findingStatus, setFindingStatus] = useState<"idle" | "running" | "done" | "error">("idle");
   const [findingError, setFindingError] = useState<string | null>(null);
+  const [replayUrl, setReplayUrl] = useState<string | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const pendingOpenRef = useRef<Promise<WebSocket> | null>(null);
@@ -452,7 +453,7 @@ export default function App() {
     []
   );
 
-  // Scrape the active tab and hand it to the Fetch.ai agent to find matching items.
+  // Hand the current URL and its cookies to the off-device browser agent.
   const runAgentTask = useCallback(
     async (taskInput: string) => {
       const task = taskInput.trim();
@@ -460,23 +461,25 @@ export default function App() {
       setFindingStatus("running");
       setFindingError(null);
       setFindings([]);
-      setStatusText("Fetch.ai agent is searching this page...");
+      setReplayUrl(null);
+      setStatusText("Spinning up a cloud browser to search...");
       try {
-        const tabs = await getActiveTabs();
+        const tabs = await getCurrentTab();
         const tab = tabs.find((candidate) => candidate.active) || tabs[0];
-        if (!tab?.id) {
-          throw new Error("No active tab available to search.");
+        if (!tab?.url) {
+          throw new Error("No active tab URL to search.");
         }
-        const page = await getPageContentFromTab(tab.id, makeId(), true);
+        let cookies: chrome.cookies.Cookie[] = [];
+        try {
+          cookies = await chrome.cookies.getAll({ url: tab.url });
+        } catch {
+          // The remote agent can still search public content while logged out.
+          cookies = [];
+        }
         const response = await fetch(createAgentTaskUrl(projectIdRef.current), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            task,
-            url: page.url,
-            text: page.text,
-            html: page.html
-          })
+          body: JSON.stringify({ task, url: tab.url, cookies })
         });
         if (!response.ok) {
           let detail = `Backend returned ${response.status}.`;
@@ -491,6 +494,7 @@ export default function App() {
         const data = (await response.json()) as AgentTaskResponse;
         const results = data.findings || [];
         setFindings(results);
+        setReplayUrl(data.replay_url || null);
         setFindingStatus("done");
         setStatusText(
           results.length ? `Found ${results.length} item(s)` : "No matching items found"
@@ -502,7 +506,7 @@ export default function App() {
         setStatusText("Agent task failed");
       }
     },
-    [getActiveTabs, getPageContentFromTab]
+    [getCurrentTab]
   );
 
   const handleRequestTabContent = useCallback(
@@ -1028,6 +1032,13 @@ export default function App() {
             <span>Find</span>
           </button>
         </form>
+
+        {replayUrl ? (
+          <a className="replay-link" href={replayUrl} target="_blank" rel="noreferrer">
+            <ExternalLink aria-hidden="true" />
+            Watch the agent browse
+          </a>
+        ) : null}
 
         {findingStatus === "error" && findingError ? (
           <div className="status-line failed">

@@ -175,7 +175,7 @@ export interface ApplyModsResult {
   reloaded: number;
 }
 
-/** One item a Fetch.ai agent task found on the current page. */
+/** One item the cloud browser agent found from the current page. */
 export interface AgentFinding {
   title: string;
   url: string;
@@ -190,6 +190,8 @@ export interface AgentTaskResponse {
   task: string;
   url: string;
   findings: AgentFinding[];
+  session_id?: string;
+  replay_url?: string;
 }
 
 export type RuntimeRequest =
