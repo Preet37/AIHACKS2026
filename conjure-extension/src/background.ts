@@ -317,9 +317,30 @@ const openShortcutSettings = async (): Promise<RuntimeResult<{ opened: boolean; 
   }
 };
 
+const isInjectableTab = (tab?: chrome.tabs.Tab) =>
+  typeof tab?.id === "number" && /^https?:\/\//.test(tab.url || "");
+
 const getActiveTab = async (): Promise<chrome.tabs.Tab | undefined> => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return typeof tab?.id === "number" ? tab : undefined;
+};
+
+const getCommandTargetTab = async (sender?: chrome.runtime.MessageSender): Promise<chrome.tabs.Tab | undefined> => {
+  if (isInjectableTab(sender?.tab)) return sender?.tab;
+
+  const active = await getActiveTab();
+  if (isInjectableTab(active)) return active;
+
+  const currentWindowTabs = await chrome.tabs.query({ currentWindow: true });
+  const currentWindowTarget = currentWindowTabs
+    .filter(isInjectableTab)
+    .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+  if (currentWindowTarget) return currentWindowTarget;
+
+  const allTabs = await chrome.tabs.query({});
+  return allTabs
+    .filter(isInjectableTab)
+    .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
 };
 
 const openSidePanelFallback = async (tab?: chrome.tabs.Tab) => {
@@ -332,19 +353,41 @@ const openSidePanelFallback = async (tab?: chrome.tabs.Tab) => {
   }
 };
 
-const toggleCommandBar = async (): Promise<RuntimeResult<{ delivered: boolean; fallback: boolean }>> => {
+const ensureContentScript = async (tabId: number) => {
+  try {
+    const loader = chrome.runtime.getManifest().content_scripts?.[0]?.js?.[0];
+    if (!loader) return;
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: [loader]
+    });
+  } catch {
+    // Static content-script registration is the primary path. This best-effort
+    // injection only helps already-open tabs after an extension reload.
+  }
+};
+
+const toggleCommandBar = async (
+  sender?: chrome.runtime.MessageSender
+): Promise<RuntimeResult<{ delivered: boolean; fallback: boolean; tabId?: number }>> => {
   if (!isRuntimeAvailable()) return { ok: false, error: "Extension runtime is unavailable." };
-  const tab = await getActiveTab();
+  const tab = await getCommandTargetTab(sender);
   if (typeof tab?.id !== "number") {
-    return { ok: false, error: "No active tab is available." };
+    return { ok: false, error: "No normal webpage tab is available for the command overlay." };
   }
 
   try {
     await chrome.tabs.sendMessage(tab.id, { type: CONTENT_MESSAGE.TOGGLE_COMMAND_BAR });
-    return { ok: true, data: { delivered: true, fallback: false } };
+    return { ok: true, data: { delivered: true, fallback: false, tabId: tab.id } };
   } catch {
-    await openSidePanelFallback(tab);
-    return { ok: true, data: { delivered: false, fallback: true } };
+    await ensureContentScript(tab.id);
+    try {
+      await chrome.tabs.sendMessage(tab.id, { type: CONTENT_MESSAGE.TOGGLE_COMMAND_BAR });
+      return { ok: true, data: { delivered: true, fallback: false, tabId: tab.id } };
+    } catch {
+      await openSidePanelFallback(tab);
+      return { ok: true, data: { delivered: false, fallback: true, tabId: tab.id } };
+    }
   }
 };
 
@@ -387,7 +430,7 @@ const handleRuntimeMessage = async (
     case BACKGROUND_MESSAGE.OPEN_SHORTCUT_SETTINGS:
       return openShortcutSettings();
     case BACKGROUND_MESSAGE.TOGGLE_COMMAND_BAR:
-      return toggleCommandBar();
+      return toggleCommandBar(sender);
     case BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE:
       return reloadAllTabsOnce();
     case BACKGROUND_MESSAGE.APPLY_MODS:
