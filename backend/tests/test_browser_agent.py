@@ -6,7 +6,15 @@ from backend.utils import browser_agent
 from backend.utils.browser_agent import (
     BrowserAgentError,
     BrowserAgentSettings,
+    _browserbase_session_params,
+    _drive_session,
+    _first_reachable_item,
+    _fast_shopping_search_url,
+    _is_product_destination,
     _items_from_result,
+    _navigation_response,
+    _navigate_with_agent_fallback,
+    _rank_dom_items,
     _response_result,
     _to_playwright_cookies,
     missing_requirement,
@@ -22,7 +30,6 @@ def _ready_settings(**overrides):
         browserbase_api_key="bb_test",
         browserbase_project_id="proj_test",
         model="anthropic/claude-sonnet-4-6",
-        model_api_key="sk-ant-test",
     )
     base.update(overrides)
     return BrowserAgentSettings(**base)
@@ -130,14 +137,433 @@ def test_missing_requirement_flags_missing_browserbase_key(monkeypatch):
     assert msg == "BROWSERBASE_API_KEY is not configured on the backend"
 
 
-def test_missing_requirement_flags_missing_model_key(monkeypatch):
-    monkeypatch.setattr(browser_agent.importlib.util, "find_spec", lambda name: object())
-    msg = missing_requirement(_ready_settings(model_api_key=None))
-    assert msg and "model API key" in msg
-
-
 # --- find_items_remote guards --------------------------------------------------
 
 def test_find_items_remote_requires_start_url():
     with pytest.raises(BrowserAgentError):
         run(browser_agent.find_items_remote(task="jackets", settings=_ready_settings(), start_url=""))
+
+
+# --- Browserbase-managed session flow -----------------------------------------
+
+def test_browserbase_session_params_enable_managed_reliability_features():
+    params = _browserbase_session_params(
+        _ready_settings(
+            region="us-west-2",
+            use_proxies=True,
+            verified=True,
+            advanced_stealth=True,
+        ),
+    )
+
+    assert params["project_id"] == "proj_test"
+    assert params["proxies"] is True
+    assert params["region"] == "us-west-2"
+    assert params["timeout"] == 900
+    assert params["browser_settings"] == {
+        "block_ads": True,
+        "solve_captchas": True,
+        "log_session": True,
+        "record_session": True,
+        "verified": True,
+        "advanced_stealth": True,
+    }
+    assert params["user_metadata"]["conjureFeature"] == "off-device-finder"
+    assert "task" not in params["user_metadata"]
+
+
+def test_navigation_uses_stagehand_agent_fallback():
+    class Session:
+        def __init__(self):
+            self.calls = []
+
+        async def navigate(self, **kwargs):
+            self.calls.append(("navigate", kwargs))
+            raise RuntimeError("ERR_HTTP2_PROTOCOL_ERROR")
+
+        async def execute(self, **kwargs):
+            self.calls.append(("execute", kwargs))
+
+    session = Session()
+    run(_navigate_with_agent_fallback(session, "https://books.toscrape.com/", _ready_settings()))
+
+    assert [name for name, _ in session.calls] == ["navigate", "execute"]
+    assert session.calls[0][1] == {"url": "https://books.toscrape.com/"}
+    assert "Navigate directly" in session.calls[1][1]["execute_options"]["instruction"]
+
+
+def test_navigation_reports_both_managed_failures():
+    class Session:
+        async def navigate(self, **kwargs):
+            raise RuntimeError("navigation failed")
+
+        async def execute(self, **kwargs):
+            raise RuntimeError("agent failed")
+
+    with pytest.raises(BrowserAgentError, match="managed Stagehand navigation and agent fallback"):
+        run(_navigate_with_agent_fallback(Session(), "https://example.com", _ready_settings()))
+
+
+def test_drive_session_uses_playwright_only_for_cookie_injection():
+    events = []
+
+    class Context:
+        async def add_cookies(self, cookies):
+            events.append(("cookies", cookies))
+
+    class Browser:
+        contexts = [Context()]
+
+        async def close(self):
+            events.append(("browser_close", None))
+
+    class Chromium:
+        async def connect_over_cdp(self, cdp_url):
+            events.append(("connect", cdp_url))
+            return Browser()
+
+    class Playwright:
+        chromium = Chromium()
+
+    class PlaywrightContextManager:
+        async def __aenter__(self):
+            return Playwright()
+
+        async def __aexit__(self, *args):
+            return None
+
+    class Session:
+        async def navigate(self, **kwargs):
+            events.append(("navigate", kwargs))
+            return {
+                "data": {
+                    "result": {
+                        "response": {"status": 200, "url": kwargs["url"]},
+                    }
+                }
+            }
+
+        async def extract(self, **kwargs):
+            assert "page" not in kwargs
+            events.append(("extract", kwargs))
+            return {"data": {"result": {"items": [{"title": "Book", "url": "https://x/item/1"}]}}}
+
+    items = run(
+        _drive_session(
+            session=Session(),
+            cdp_url="wss://browserbase.test",
+            start_url="https://books.toscrape.com/",
+            task="books under £20",
+            settings=_ready_settings(),
+            playwright_cookies=[{"name": "currency", "value": "GBP", "domain": ".toscrape.com"}],
+            async_playwright=lambda: PlaywrightContextManager(),
+        )
+    )
+
+    assert items == [{"title": "Book", "url": "https://x/item/1"}]
+    assert events[0] == ("connect", "wss://browserbase.test")
+    assert events[1][0] == "cookies"
+    assert events[2] == ("navigate", {"url": "https://books.toscrape.com/"})
+    assert ("navigate", {"url": "https://x/item/1"}) in events
+    assert events[-1][0] == "browser_close"
+
+
+def test_drive_session_skips_playwright_when_there_are_no_cookies():
+    class Session:
+        async def navigate(self, **kwargs):
+            return {
+                "data": {
+                    "result": {
+                        "response": {"status": 200, "url": kwargs["url"]},
+                    }
+                }
+            }
+
+        async def extract(self, **kwargs):
+            return {"data": {"result": {"items": [{"title": "Book", "url": "https://x/item/1"}]}}}
+
+    def unexpected_playwright():
+        raise AssertionError("Playwright should not open for a public, cookieless browse")
+
+    items = run(
+        _drive_session(
+            session=Session(),
+            cdp_url=None,
+            start_url="https://books.toscrape.com/",
+            task="books under £20",
+            settings=_ready_settings(),
+            playwright_cookies=[],
+            async_playwright=unexpected_playwright,
+        )
+    )
+
+    assert items == [{"title": "Book", "url": "https://x/item/1"}]
+
+
+def test_navigation_response_reads_browserbase_status_and_final_url():
+    response = {
+        "data": {
+            "result": {
+                "response": {
+                    "status": 200,
+                    "url": "https://shop.test/final",
+                }
+            }
+        }
+    }
+    assert _navigation_response(response) == (200, "https://shop.test/final")
+    assert _navigation_response({"data": {"result": None}}) == (None, None)
+
+
+def test_first_reachable_item_skips_404_and_returns_exactly_one_verified_link():
+    class Session:
+        def __init__(self):
+            self.urls = []
+
+        async def navigate(self, **kwargs):
+            url = kwargs["url"]
+            self.urls.append(url)
+            status = 404 if url.endswith("/missing") else 200
+            return {
+                "data": {
+                    "result": {
+                        "response": {"status": status, "url": url},
+                    }
+                }
+            }
+
+    session = Session()
+    result = run(
+        _first_reachable_item(
+            session,
+            [
+                {"title": "Broken", "url": "/missing"},
+                {"title": "Works", "url": "/working"},
+                {"title": "Also works", "url": "/unused"},
+            ],
+            "https://shop.test/search",
+        )
+    )
+
+    assert result == {"title": "Works", "url": "https://shop.test/working"}
+    assert session.urls == ["https://shop.test/missing", "https://shop.test/working"]
+
+
+def test_first_reachable_item_rejects_failed_and_unverifiable_destinations():
+    class Session:
+        async def navigate(self, **kwargs):
+            if kwargs["url"].endswith("/error"):
+                raise RuntimeError("navigation failed")
+            return {"data": {"result": {"response": {"status": 500, "url": kwargs["url"]}}}}
+
+    result = run(
+        _first_reachable_item(
+            Session(),
+            [
+                {"title": "Bad scheme", "url": "javascript:alert(1)"},
+                {"title": "Error", "url": "/error"},
+                {"title": "Server error", "url": "/500"},
+            ],
+            "https://shop.test/",
+        )
+    )
+
+    assert result is None
+
+
+def test_product_destination_rejects_search_pages_and_requires_amazon_detail_route():
+    source = "https://www.amazon.com/s?k=jacket"
+    assert not _is_product_destination("https://www.amazon.com/?s=jacket", source)
+    assert not _is_product_destination("https://www.amazon.com/s?k=jacket", source)
+    assert not _is_product_destination("https://www.amazon.com/b?node=123", source)
+    assert _is_product_destination(
+        "https://www.amazon.com/Columbia-Watertight-Jacket/dp/B00HNQUR4O",
+        source,
+    )
+    assert _is_product_destination(
+        "https://www.amazon.com/sspa/click?url=%2Fdp%2FB00HNQUR4O",
+        source,
+        allow_redirect=True,
+    )
+
+
+def test_drive_session_clicks_named_result_instead_of_returning_search_url():
+    events = []
+
+    class Session:
+        extracted_detail = False
+
+        async def navigate(self, **kwargs):
+            events.append(("navigate", kwargs["url"]))
+            return {
+                "data": {
+                    "result": {
+                        "response": {"status": 200, "url": kwargs["url"]},
+                    }
+                }
+            }
+
+        async def extract(self, **kwargs):
+            events.append(("extract", kwargs["instruction"]))
+            if self.extracted_detail:
+                item_url = "https://www.amazon.com/Columbia-Watertight/dp/B00HNQUR4O"
+            else:
+                item_url = "https://www.amazon.com/?s=jacket"
+            return {
+                "data": {
+                    "result": {
+                        "items": [
+                            {
+                                "title": "Columbia Watertight II Jacket",
+                                "url": item_url,
+                                "price": "$67.49",
+                            }
+                        ]
+                    }
+                }
+            }
+
+        async def act(self, **kwargs):
+            events.append(("act", kwargs["input"]))
+            self.extracted_detail = True
+
+        async def execute(self, **kwargs):
+            raise AssertionError("The slower autonomous agent should not run")
+
+    items = run(
+        _drive_session(
+            session=Session(),
+            cdp_url=None,
+            start_url="https://www.amazon.com/?s=jacket",
+            task="find a jacket under $100",
+            settings=_ready_settings(),
+            playwright_cookies=[],
+            async_playwright=lambda: None,
+        )
+    )
+
+    assert items[0]["url"] == "https://www.amazon.com/dp/B00HNQUR4O"
+    assert [event[0] for event in events] == ["navigate", "extract", "act", "extract", "navigate"]
+    assert "Columbia Watertight II Jacket" in events[2][1]
+
+
+def test_dom_fast_path_ranks_matching_detail_links_and_honors_price_limit():
+    items = _rank_dom_items(
+        [
+            {
+                "title": "Unrelated boots",
+                "url": "https://www.amazon.com/dp/B000000001",
+                "price": "$40.00",
+                "note": "boots",
+            },
+            {
+                "title": "Expensive Columbia jacket",
+                "url": "https://www.amazon.com/dp/B000000002",
+                "price": "$140.00",
+                "note": "rain jacket",
+            },
+            {
+                "title": "Columbia Watertight II Jacket",
+                "url": "https://www.amazon.com/Columbia/dp/B000000003?ref=search",
+                "price": "$67.49",
+                "note": "rain jacket, 4.7 stars",
+            },
+            {
+                "title": "Search jackets",
+                "url": "https://www.amazon.com/?s=jacket",
+                "price": "",
+                "note": "search results",
+            },
+        ],
+        "find a jacket under $100",
+        "https://www.amazon.com/s?k=jacket",
+        3,
+    )
+
+    assert [item["title"] for item in items] == ["Columbia Watertight II Jacket"]
+
+
+def test_fast_shopping_search_url_skips_agent_on_supported_homepages():
+    assert _fast_shopping_search_url(
+        "https://www.amazon.com/",
+        "Find one verified jacket under $100 on this page",
+    ) == "https://www.amazon.com/s?k=jacket"
+    assert _fast_shopping_search_url(
+        "https://www.ebay.com",
+        "search for mechanical keyboard",
+    ) == "https://www.ebay.com/sch/i.html?_nkw=mechanical+keyboard"
+    assert _fast_shopping_search_url(
+        "https://www.amazon.com/dp/B00HNQUR4O",
+        "find a jacket",
+    ) is None
+
+
+def test_drive_session_uses_browserbase_dom_before_stagehand_extract():
+    events = []
+
+    class Page:
+        async def evaluate(self, script):
+            events.append("dom")
+            assert "document.querySelectorAll" in script
+            return [
+                {
+                    "title": "Columbia Watertight II Jacket",
+                    "url": "https://www.amazon.com/Columbia/dp/B00HNQUR4O",
+                    "price": "$67.49",
+                    "note": "rain jacket",
+                }
+            ]
+
+    class Context:
+        pages = [Page()]
+
+        async def add_cookies(self, cookies):
+            raise AssertionError("No cookies should be injected")
+
+    class Browser:
+        contexts = [Context()]
+
+        async def close(self):
+            events.append("close")
+
+    class Chromium:
+        async def connect_over_cdp(self, cdp_url):
+            events.append("connect")
+            return Browser()
+
+    class Playwright:
+        chromium = Chromium()
+
+    class PlaywrightContextManager:
+        async def __aenter__(self):
+            return Playwright()
+
+        async def __aexit__(self, *args):
+            return None
+
+    class Session:
+        async def navigate(self, **kwargs):
+            events.append("navigate")
+            return {
+                "data": {
+                    "result": {"response": {"status": 200, "url": kwargs["url"]}}
+                }
+            }
+
+        async def extract(self, **kwargs):
+            raise AssertionError("Stagehand extract should be skipped on the DOM fast path")
+
+    items = run(
+        _drive_session(
+            session=Session(),
+            cdp_url="wss://browserbase.test",
+            start_url="https://www.amazon.com/s?k=jacket",
+            task="find a jacket under $100",
+            settings=_ready_settings(),
+            playwright_cookies=[],
+            async_playwright=lambda: PlaywrightContextManager(),
+        )
+    )
+
+    assert items[0]["url"] == "https://www.amazon.com/dp/B00HNQUR4O"
+    assert events == ["connect", "navigate", "dom", "navigate", "close"]

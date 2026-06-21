@@ -142,6 +142,11 @@ h2 {
   background: #e5f6ed;
 }
 
+.connection.thinking {
+  color: #245a4b;
+  background: #e7efe7;
+}
+
 .connection.error {
   color: #9d2f27;
   background: #fcecea;
@@ -537,7 +542,7 @@ h2 {
   }
 }
 
-/* Find-on-page (Fetch.ai agent) panel */
+/* Verified find-on-page result */
 .finder-panel {
   border-color: #a7cdbf;
   background: #edf8f0;
@@ -608,13 +613,23 @@ h2 {
 }
 
 .finding-card {
+  border: 1px solid #d9e3dc;
+  border-radius: 10px;
+  background: #fbfcf8;
+  overflow: hidden;
+}
+
+.finding-card-link {
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr);
   gap: 10px;
   padding: 8px;
-  border: 1px solid #d9e3dc;
-  border-radius: 10px;
-  background: #fbfcf8;
+  color: inherit;
+  text-decoration: none;
+}
+
+.finding-card-link:hover {
+  background: #f3f7f2;
 }
 
 .finding-thumb {
@@ -808,4 +823,265 @@ h2 {
   padding: 8px;
   font: inherit;
   margin-bottom: 8px;
+}
+
+/* Minimal command surface */
+.shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: #f7f8f4;
+}
+
+.project-row,
+.tabs-strip,
+.chat-log,
+.agent-workbench {
+  display: none;
+}
+
+.topbar {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.brand-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+}
+
+.brand-mark svg {
+  width: 15px;
+  height: 15px;
+}
+
+.brand p {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection {
+  width: 28px;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+}
+
+.connection span {
+  display: none;
+}
+
+.connection svg {
+  width: 13px;
+  height: 13px;
+}
+
+.use-cases {
+  display: grid;
+  gap: 6px;
+}
+
+.use-cases button {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #e1e5dc;
+  border-radius: 10px;
+  color: #526157;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+}
+
+.use-cases button:hover {
+  border-color: #9ebcaf;
+  background: #fff;
+}
+
+.use-cases button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.use-cases strong {
+  color: #24463d;
+  font-size: 11px;
+}
+
+.use-cases span {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finder-panel.hidden {
+  display: none;
+}
+
+.finder-panel {
+  padding: 9px;
+  border-color: #d5e1da;
+  background: #fff;
+  box-shadow: none;
+}
+
+.finding-list {
+  gap: 0;
+}
+
+.finding-card {
+  padding: 0;
+  border: 0;
+}
+
+.finding-card-link {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.finding-thumb {
+  display: none;
+}
+
+.mods-panel {
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mods-panel .section-title h2 {
+  color: #607066;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mods-panel .icon-button {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.mods-panel .icon-button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.mod-orbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mod-orb {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid #cbd7d0;
+  border-radius: 50%;
+  color: #245a4b;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.mod-orb:hover,
+.mod-orb.active {
+  border-color: #245a4b;
+  color: #fff;
+  background: #245a4b;
+}
+
+.mod-orb.disabled {
+  opacity: 0.45;
+}
+
+.mod-detail {
+  display: grid;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid #dce3de;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.mod-detail p {
+  color: #526157;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mod-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d69a36;
+}
+
+.mod-dot.verified {
+  background: #2b9270;
+}
+
+.editing-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding: 6px 9px;
+  border-radius: 9px;
+  color: #526157;
+  background: #edf2ed;
+  font-size: 11px;
+}
+
+.editing-pill button {
+  color: #9d2f27;
+  background: transparent;
+  cursor: pointer;
+}
+
+.composer {
+  grid-template-columns: minmax(0, 1fr) 40px;
+  margin-top: auto;
+  padding: 7px;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(20, 43, 35, 0.08);
+}
+
+.editing-pill + .composer {
+  margin-top: 0;
+}
+
+.composer input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0 10px;
+  border: 0;
+  color: #18201c;
+  background: transparent;
+  outline: none;
+}
+
+.composer input::placeholder {
+  color: #88948c;
+}
+
+.send-button {
+  align-self: center;
+  border-radius: 10px;
 }

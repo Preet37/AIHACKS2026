@@ -211,6 +211,9 @@ export interface ChatClientEvent {
   active_tabs: ActiveTabSnapshot[];
   /** When set, this turn edits (re-generates) the named mod. */
   mod_id?: string;
+  /** Per-run provider credentials from extension-local settings. */
+  provider?: ClientProvider;
+  api_key?: string;
 }
 
 export interface TabContentResponseClientEvent {
@@ -249,7 +252,9 @@ export interface AgentPullRequest {
   title?: string;
 }
 
-export type AgentProvider = "devin" | "claude" | "nemotron";
+export type ClientProvider = "anthropic" | "groq";
+
+export type AgentProvider = "devin" | "claude" | "groq" | "nemotron";
 
 export type ServerToClientEvent =
   | { type: typeof SERVER_EVENT.CONVERSATION_ID; conversation_id: string }

@@ -53,7 +53,7 @@ def test_agent_task_returns_findings_and_replay(monkeypatch):
     assert captured["start_url"] == "https://shop/s"
     assert captured["cookies"] == [{"name": "sid", "value": "x", "domain": "shop"}]
     assert isinstance(captured["settings"], BrowserAgentSettings)
-    assert captured["settings"].model_api_key == "sk-ant"
+    assert captured["settings"].model == Settings().browse_model
 
 
 def test_agent_task_requires_task(monkeypatch):

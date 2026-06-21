@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import uuid
+from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -61,9 +63,12 @@ async def run_agent_task(project_id: str, payload: AgentTaskRequest) -> dict[str
         browserbase_api_key=settings.browserbase_api_key,
         browserbase_project_id=settings.browserbase_project_id,
         model=settings.browse_model,
-        model_api_key=settings.anthropic_api_key,
         max_results=settings.browse_max_results,
         max_steps=settings.browse_max_steps,
+        region=settings.browserbase_session_region,
+        use_proxies=settings.browse_use_proxies,
+        verified=settings.browse_verified,
+        advanced_stealth=settings.browse_advanced_stealth,
     )
     blocker = browser_agent.missing_requirement(browse_settings)
     if blocker:
@@ -222,25 +227,44 @@ async def _handle_chat_message(
         await websocket.send_json({"type": "error", "message": "chat.active_tabs must be a list"})
         return
 
+    try:
+        request_agent = _agent_with_client_provider(agent, message)
+    except ValueError as exc:
+        await websocket.send_json({"type": "error", "message": str(exc)})
+        return
+
     requested_conversation_id = message.get("conversation_id")
     conversation_id, history, rules = await _prepare_conversation(
         store, project_id, requested_conversation_id
     )
     await websocket.send_json({"type": "conversation_id", "conversation_id": conversation_id})
 
-    # When the panel sends a mod_id, this turn edits that mod (a prompt change),
-    # so refresh its stored prompt up front and route generation into it.
+    # Editing is explicit. Otherwise every local build gets a fresh provisional
+    # mod, even when another customization already targets the same website.
     active_mod_id = message.get("mod_id") or None
+    project_dir = project_dir_for(request_agent.settings, project_id)
+    provisional_mod_id: str | None = None
     if active_mod_id:
-        project_dir = project_dir_for(load_settings(), project_id)
         if mods_registry.get_mod(project_dir, active_mod_id) is not None:
             mods_registry.upsert_mod(project_dir, {"id": active_mod_id, "prompt": query})
         else:
             active_mod_id = None
+    if not active_mod_id and request_agent.settings.agent_provider in {"claude", "groq", "nemotron"}:
+        provisional = mods_registry.create_mod(
+            project_dir,
+            prompt=query,
+            name=_mod_name_from_query(query),
+        )
+        provisional_mod_id = str(provisional["id"])
+        active_mod_id = provisional_mod_id
+        mods_registry.upsert_mod(
+            project_dir,
+            {"id": provisional_mod_id, "status": "building"},
+        )
 
     content_parts: list[str] = []
     try:
-        async for event in agent.stream_chat_response(
+        async for event in request_agent.stream_chat_response(
             query=query,
             project_id=project_id,
             conversation_id=conversation_id,
@@ -254,10 +278,17 @@ async def _handle_chat_message(
                 content_parts.append(str(event.get("content", "")))
             await websocket.send_json(event)
     except WebSocketDisconnect:
+        if provisional_mod_id:
+            _finish_provisional_mod(project_dir, provisional_mod_id, keep=False)
         raise
     except Exception as exc:
+        if provisional_mod_id:
+            _finish_provisional_mod(project_dir, provisional_mod_id, keep=False)
         await websocket.send_json({"type": "error", "message": str(exc)})
         return
+
+    if provisional_mod_id:
+        _finish_provisional_mod(project_dir, provisional_mod_id, keep=True)
 
     content = "".join(content_parts)
     await _persist_turn(store, conversation_id, query, content)
@@ -275,6 +306,58 @@ async def _handle_chat_message(
             "content": content,
         }
     )
+
+
+def _agent_with_client_provider(
+    agent: ConjureAgent,
+    message: dict[str, Any],
+) -> ConjureAgent:
+    """Create a per-turn agent using extension credentials without persisting them."""
+    requested = message.get("provider")
+    if requested is None:
+        return agent
+    if requested not in {"anthropic", "groq"}:
+        raise ValueError("chat.provider must be 'anthropic' or 'groq'")
+
+    raw_key = message.get("api_key")
+    api_key = raw_key.strip() if isinstance(raw_key, str) else ""
+    if not api_key:
+        raise ValueError(f"An API key is required for {requested}")
+    if len(api_key) > 512:
+        raise ValueError("The provider API key is too long")
+
+    if requested == "anthropic":
+        settings = replace(
+            agent.settings,
+            agent_provider="claude",
+            anthropic_api_key=api_key,
+            demo_mode=False,
+        )
+    else:
+        settings = replace(
+            agent.settings,
+            agent_provider="groq",
+            groq_api_key=api_key,
+            demo_mode=False,
+        )
+    return ConjureAgent(
+        settings,
+        devin_client=agent.devin_client,
+        store=agent.store,
+    )
+
+
+def _mod_name_from_query(query: str) -> str:
+    name = " ".join(query.strip().split())
+    return (name[:57].rstrip() + "...") if len(name) > 60 else (name or "Untitled mod")
+
+
+def _finish_provisional_mod(project_dir: Path, mod_id: str, *, keep: bool) -> None:
+    """Promote a built provisional mod, or remove its empty/failed record."""
+    if keep and mods_registry.mod_bundle(project_dir, mod_id) is not None:
+        mods_registry.upsert_mod(project_dir, {"id": mod_id, "status": "active"})
+        return
+    mods_registry.delete_mod(project_dir, mod_id)
 
 
 async def _update_memory(

@@ -38,6 +38,7 @@ import {
   type AgentProvider,
   type AgentPullRequest,
   type ClientToServerEvent,
+  type ClientProvider,
   type ConsoleLogEntry,
   type GeneratedBundle,
   type GetElementHtmlMessage,
@@ -47,8 +48,31 @@ import {
   type RuntimeResult,
   type ServerToClientEvent
 } from "../shared/messages";
+import {
+  PROVIDER_STORAGE_KEY,
+  readProviderSettings,
+  type PersistedProviderSettings
+} from "../shared/providerSettings";
+import { appendDiagnosticLog } from "../shared/diagnosticLogs";
 
 const SESSION_STORAGE_KEY = "conjure.session";
+
+const USE_CASES = [
+  {
+    label: "Agent button",
+    prompt: "Build a button that asks an agent to explain the current page."
+  },
+  {
+    label: "Cross-site mod",
+    prompt: "On Amazon and eBay, highlight products under $50."
+  },
+  {
+    label: "Find one link",
+    prompt: "Find one verified jacket under $100 on this page."
+  }
+] as const;
+
+const isFindRequest = (prompt: string) => /^(find|search|look for|shop for)\b/i.test(prompt);
 
 interface PersistedSession {
   projectId: string;
@@ -112,6 +136,10 @@ const captureException = (error: unknown) => {
   if (CONJURE_CONFIG.sentry.enabled) {
     Sentry.captureException(error);
   }
+};
+
+const recordDiagnosticError = (source: string, error: unknown) => {
+  appendDiagnosticLog(source, error).catch(captureException);
 };
 
 const isRuntimeOk = <T,>(result: RuntimeResult<T> | undefined): result is { ok: true; data: T } =>
@@ -227,19 +255,20 @@ export default function App() {
   });
   const [mods, setMods] = useState<ModRecord[]>([]);
   const [editingMod, setEditingMod] = useState<{ id: string; prompt: string } | null>(null);
+  const [expandedModId, setExpandedModId] = useState<string | null>(null);
+  const [provider, setProvider] = useState<ClientProvider>("anthropic");
+  const [providerApiKey, setProviderApiKey] = useState("");
   const [tools, setTools] = useState<ToolRun[]>([]);
   const [rules, setRules] = useState<string[]>([]);
   const [statusText, setStatusText] = useState("Ready");
-  const [agentTask, setAgentTask] = useState("");
   const [findings, setFindings] = useState<AgentFinding[]>([]);
   const [findingStatus, setFindingStatus] = useState<"idle" | "running" | "done" | "error">("idle");
   const [findingError, setFindingError] = useState<string | null>(null);
-  const [replayUrl, setReplayUrl] = useState<string | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const pendingOpenRef = useRef<Promise<WebSocket> | null>(null);
   const currentAssistantIdRef = useRef<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const commandInputRef = useRef<HTMLInputElement>(null);
   const hydratedRef = useRef(false);
   const projectIdRef = useRef(projectId);
 
@@ -461,7 +490,6 @@ export default function App() {
       setFindingStatus("running");
       setFindingError(null);
       setFindings([]);
-      setReplayUrl(null);
       setStatusText("Spinning up a cloud browser to search...");
       try {
         const tabs = await getCurrentTab();
@@ -494,7 +522,6 @@ export default function App() {
         const data = (await response.json()) as AgentTaskResponse;
         const results = data.findings || [];
         setFindings(results);
-        setReplayUrl(data.replay_url || null);
         setFindingStatus("done");
         setStatusText(
           results.length ? `Found ${results.length} item(s)` : "No matching items found"
@@ -609,6 +636,12 @@ export default function App() {
             pullRequests: event.pull_requests || []
           });
           setStatusText(event.phrase);
+          if (event.status === "error" || event.status === "suspended") {
+            recordDiagnosticError(
+              event.provider === "groq" ? "Groq agent" : "Agent",
+              event.status_detail || event.phrase
+            );
+          }
           return;
         case SERVER_EVENT.THINKING:
           setStatusText("Thinking");
@@ -640,6 +673,10 @@ export default function App() {
           setStatusText("Ready");
           return;
         case SERVER_EVENT.ERROR:
+          recordDiagnosticError(
+            agentRun.provider === "groq" || provider === "groq" ? "Groq agent" : "Agent",
+            event.message
+          );
           finalizeAssistant();
           setAgentRun({
             active: false,
@@ -667,7 +704,9 @@ export default function App() {
       applyModBundles,
       finalizeAssistant,
       handleRequestConsoleLogs,
-      handleRequestTabContent
+      handleRequestTabContent,
+      agentRun.provider,
+      provider
     ]
   );
 
@@ -689,6 +728,7 @@ export default function App() {
       };
 
       socket.onerror = () => {
+        recordDiagnosticError("WebSocket", "WebSocket connection failed.");
         pendingOpenRef.current = null;
         setConnectionState("error");
         setStatusText("Connection error");
@@ -718,6 +758,16 @@ export default function App() {
 
   const submitChat = useCallback(
     async (query: string, modId?: string) => {
+      const apiKey = providerApiKey.trim();
+      if (!apiKey) {
+        setInput(query);
+        setStatusText(
+          `Add your ${provider === "groq" ? "Groq" : "Anthropic"} API key in Extension options`
+        );
+        chrome.runtime.openOptionsPage().catch(captureException);
+        commandInputRef.current?.focus();
+        return;
+      }
       currentAssistantIdRef.current = null;
       setAgentRun({
         active: true,
@@ -745,16 +795,20 @@ export default function App() {
             query,
             conversation_id: conversationId,
             active_tabs: tabs,
+            provider,
+            api_key: apiKey,
             ...(modId ? { mod_id: modId } : {})
           } satisfies ClientToServerEvent)
         );
         setStatusText(modId ? "Rebuilding mod" : "Streaming");
       } catch (error) {
         captureException(error);
+        recordDiagnosticError(provider === "groq" ? "Groq agent" : "Agent", error);
+        setAgentRun((current) => ({ ...current, active: false, status: "error" }));
         addSystemMessage(error instanceof Error ? error.message : String(error));
       }
     },
-    [addSystemMessage, conversationId, getCurrentTab, openSocket]
+    [addSystemMessage, conversationId, getCurrentTab, openSocket, provider, providerApiKey]
   );
 
   const handleSubmit = async (event: FormEvent) => {
@@ -762,26 +816,20 @@ export default function App() {
     const query = input.trim();
     if (!query) return;
     setInput("");
+    if (editingMod) {
+      const modId = editingMod.id;
+      setEditingMod(null);
+      await submitChat(query, modId);
+      return;
+    }
+    if (isFindRequest(query)) {
+      await runAgentTask(query);
+      return;
+    }
+    setFindingStatus("idle");
+    setFindingError(null);
+    setFindings([]);
     await submitChat(query);
-  };
-
-  const submitModChange = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!editingMod) return;
-    const prompt = editingMod.prompt.trim();
-    if (!prompt) return;
-    const modId = editingMod.id;
-    setEditingMod(null);
-    await submitChat(prompt, modId);
-  };
-
-  const submitAgentTask = async (event: FormEvent) => {
-    event.preventDefault();
-    await runAgentTask(agentTask);
-  };
-
-  const refreshTabs = async () => {
-    await getCurrentTab();
   };
 
   // Restore the previous session so closing/reopening the side panel (or a
@@ -820,6 +868,34 @@ export default function App() {
   }, [projectId, conversationId, messages]);
 
   useEffect(() => {
+    let cancelled = false;
+    readProviderSettings()
+      .then((saved) => {
+        if (cancelled) return;
+        setProvider(saved.provider);
+        setProviderApiKey(saved.apiKey);
+      })
+      .catch(captureException);
+
+    const handleStorageChange = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      areaName: string
+    ) => {
+      if (areaName !== "local" || !changes[PROVIDER_STORAGE_KEY]) return;
+      const saved = changes[PROVIDER_STORAGE_KEY].newValue as
+        | PersistedProviderSettings
+        | undefined;
+      setProvider(saved?.provider === "groq" ? "groq" : "anthropic");
+      setProviderApiKey(typeof saved?.apiKey === "string" ? saved.apiKey : "");
+    };
+    chrome.storage.onChanged.addListener(handleStorageChange);
+    return () => {
+      cancelled = true;
+      chrome.storage.onChanged.removeListener(handleStorageChange);
+    };
+  }, []);
+
+  useEffect(() => {
     void getCurrentTab();
     chrome.runtime
       .sendMessage({ type: BACKGROUND_MESSAGE.RELOAD_CURRENT_TAB_ONCE })
@@ -831,10 +907,6 @@ export default function App() {
     void refreshAndApplyMods(projectId);
   }, [refreshAndApplyMods, projectId]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ block: "end" });
-  }, [messages]);
-
   useEffect(
     () => () => {
       socketRef.current?.close();
@@ -842,8 +914,13 @@ export default function App() {
     []
   );
 
+  const busy = agentRun.active || findingStatus === "running";
+  const expandedMod = mods.find((mod) => mod.id === expandedModId);
+
   const statusIcon =
-    connectionState === "connected" ? (
+    busy ? (
+      <Loader2 aria-hidden="true" className="spin" />
+    ) : connectionState === "connected" ? (
       <CheckCircle2 aria-hidden="true" />
     ) : connectionState === "connecting" ? (
       <Loader2 aria-hidden="true" className="spin" />
@@ -868,6 +945,8 @@ export default function App() {
   const providerLabel =
     agentRun.provider === "claude"
       ? "Claude"
+      : agentRun.provider === "groq"
+        ? "Groq"
       : agentRun.provider === "nemotron"
         ? "Nemotron"
         : agentRun.provider === "devin"
@@ -883,12 +962,12 @@ export default function App() {
           </div>
           <div>
             <h1>conjure</h1>
-            <p>{statusText}</p>
+            <p>{busy ? "Thinking" : statusText}</p>
           </div>
         </div>
-        <div className={`connection ${connectionState}`}>
+        <div className={`connection ${busy ? "thinking" : connectionState}`}>
           {statusIcon}
-          <span>{connectionState}</span>
+          <span>{busy ? "Thinking" : connectionState}</span>
         </div>
       </header>
 
@@ -900,7 +979,12 @@ export default function App() {
           onChange={(event) => setProjectId(event.target.value)}
           disabled={connectionState === "connected"}
         />
-        <button type="button" title="Refresh current tab" onClick={refreshTabs} className="icon-button">
+        <button
+          type="button"
+          title="Refresh current tab"
+          onClick={() => void getCurrentTab()}
+          className="icon-button"
+        >
           <RefreshCcw aria-hidden="true" />
         </button>
       </section>
@@ -930,7 +1014,6 @@ export default function App() {
             <p>{message.content}</p>
           </article>
         ))}
-        <div ref={messagesEndRef} />
       </section>
 
       <section className="workbench agent-workbench" aria-label="Agent progress">
@@ -1003,43 +1086,29 @@ export default function App() {
         </div>
       </section>
 
-      <section className="panel-section finder-panel" aria-label="Find on this page">
-        <div className="section-title">
-          <ShoppingBag aria-hidden="true" />
-          <h2>Find on this page</h2>
-        </div>
-        <p className="finder-hint">
-          Have a Fetch.ai agent look through the page you are on. Try "jackets under $100".
-        </p>
-        <form className="finder-form" onSubmit={submitAgentTask}>
-          <input
-            value={agentTask}
-            onChange={(event) => setAgentTask(event.target.value)}
-            placeholder="What should the agent find here?"
-            disabled={findingStatus === "running"}
-          />
+      <section className="use-cases" aria-label="Example prompts">
+        {USE_CASES.map((useCase) => (
           <button
-            type="submit"
-            className="finder-button"
-            title="Run the agent on this page"
-            disabled={findingStatus === "running" || !agentTask.trim()}
+            key={useCase.label}
+            type="button"
+            title={useCase.prompt}
+            disabled={busy}
+            onClick={() => {
+              setEditingMod(null);
+              setInput(useCase.prompt);
+              commandInputRef.current?.focus();
+            }}
           >
-            {findingStatus === "running" ? (
-              <Loader2 aria-hidden="true" className="spin" />
-            ) : (
-              <Search aria-hidden="true" />
-            )}
-            <span>Find</span>
+            <strong>{useCase.label}</strong>
+            <span>{useCase.prompt}</span>
           </button>
-        </form>
+        ))}
+      </section>
 
-        {replayUrl ? (
-          <a className="replay-link" href={replayUrl} target="_blank" rel="noreferrer">
-            <ExternalLink aria-hidden="true" />
-            Watch the agent browse
-          </a>
-        ) : null}
-
+      <section
+        className={`panel-section finder-panel ${findingStatus === "idle" || findingStatus === "running" ? "hidden" : ""}`}
+        aria-label="Verified result"
+      >
         {findingStatus === "error" && findingError ? (
           <div className="status-line failed">
             <AlertTriangle aria-hidden="true" />
@@ -1056,30 +1125,28 @@ export default function App() {
             {findings.map((finding, index) => (
               <li key={`${finding.url}-${index}`} className="finding-card">
                 <a
-                  className="finding-thumb"
+                  className="finding-card-link"
                   href={finding.url}
                   target="_blank"
                   rel="noreferrer"
+                  aria-label={`Open ${finding.title}`}
                 >
-                  {finding.image ? (
-                    <img src={finding.image} alt={finding.title} loading="lazy" />
-                  ) : (
-                    <ImageOff aria-hidden="true" />
-                  )}
+                  <span className="finding-thumb">
+                    {finding.image ? (
+                      <img src={finding.image} alt="" loading="lazy" />
+                    ) : (
+                      <ImageOff aria-hidden="true" />
+                    )}
+                  </span>
+                  <span className="finding-body">
+                    <span className="finding-title">
+                      {finding.title}
+                      <ExternalLink aria-hidden="true" />
+                    </span>
+                    {finding.price ? <span className="finding-price">{finding.price}</span> : null}
+                    {finding.note ? <span className="finding-note">{finding.note}</span> : null}
+                  </span>
                 </a>
-                <div className="finding-body">
-                  <a
-                    className="finding-title"
-                    href={finding.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {finding.title}
-                    <ExternalLink aria-hidden="true" />
-                  </a>
-                  {finding.price ? <span className="finding-price">{finding.price}</span> : null}
-                  {finding.note ? <span className="finding-note">{finding.note}</span> : null}
-                </div>
               </li>
             ))}
           </ul>
@@ -1088,8 +1155,7 @@ export default function App() {
 
       <section className="panel-section mods-panel" aria-label="Mods">
         <div className="section-title">
-          <Puzzle aria-hidden="true" />
-          <h2>Mods ({mods.length})</h2>
+          <h2>Mods</h2>
           <button
             type="button"
             title="Refresh and re-apply mods"
@@ -1100,106 +1166,95 @@ export default function App() {
           </button>
         </div>
         {mods.length === 0 ? (
-          <p className="empty">No mods yet. Ask Conjure to build one below.</p>
+          <p className="empty">Your mods will appear here.</p>
         ) : (
-          <ul className="mod-list">
-            {mods.map((mod) => {
-              const verified = mod.last_verified;
-              const verdict = verified?.passed
-                ? "verified"
-                : verified
-                  ? "failed"
-                  : "unverified";
-              return (
-                <li key={mod.id} className={`mod-item ${mod.status}`}>
-                  <div className="mod-head">
-                    <strong>{mod.name}</strong>
-                    <span className={`mod-badge ${verdict}`}>{verdict}</span>
-                  </div>
-                  <p className="mod-prompt">{mod.prompt}</p>
-                  {mod.websites?.length ? (
-                    <div className="mod-websites" aria-label="Supported websites">
-                      {mod.websites.map((website) => (
-                        <span key={website}>{website}</span>
-                      ))}
-                    </div>
-                  ) : null}
-                  {verified?.replay_url ? (
-                    <a
-                      className="replay-link"
-                      href={verified.replay_url}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <ExternalLink aria-hidden="true" />
-                      Sandbox replay
-                    </a>
-                  ) : null}
-                  {editingMod?.id === mod.id ? (
-                    <form className="mod-edit" onSubmit={submitModChange}>
-                      <textarea
-                        value={editingMod.prompt}
-                        onChange={(event) =>
-                          setEditingMod({ id: mod.id, prompt: event.target.value })
-                        }
-                        rows={2}
-                      />
-                      <div className="mod-edit-actions">
-                        <button type="submit" className="mod-action">
-                          Rebuild
-                        </button>
-                        <button
-                          type="button"
-                          className="mod-action ghost"
-                          onClick={() => setEditingMod(null)}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <div className="mod-actions">
-                      <button
-                        type="button"
-                        className="mod-action"
-                        title="Change the prompt and rebuild this mod"
-                        onClick={() => setEditingMod({ id: mod.id, prompt: mod.prompt })}
-                      >
-                        <Pencil aria-hidden="true" /> Change
-                      </button>
-                      <button
-                        type="button"
-                        className="mod-action danger"
-                        title="Remove this mod"
-                        onClick={() => void removeMod(mod)}
-                      >
-                        <Trash2 aria-hidden="true" /> Remove
-                      </button>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          <div className="mod-orbs">
+            {mods.map((mod) => (
+              <button
+                key={mod.id}
+                type="button"
+                className={`mod-orb ${expandedModId === mod.id ? "active" : ""} ${mod.status}`}
+                title={mod.name}
+                aria-label={mod.name}
+                aria-expanded={expandedModId === mod.id}
+                onClick={() => setExpandedModId((current) => (current === mod.id ? null : mod.id))}
+              >
+                {(mod.name.trim()[0] || "M").toUpperCase()}
+              </button>
+            ))}
+          </div>
         )}
+
+        {expandedMod ? (
+          <article className="mod-detail">
+            <div className="mod-head">
+              <strong>{expandedMod.name}</strong>
+              <span className={`mod-dot ${expandedMod.last_verified?.passed ? "verified" : ""}`} />
+            </div>
+            <p>{expandedMod.prompt}</p>
+            {expandedMod.websites?.length ? (
+              <div className="mod-websites" aria-label="Supported websites">
+                {expandedMod.websites.map((website) => (
+                  <span key={website}>{website}</span>
+                ))}
+              </div>
+            ) : null}
+            <div className="mod-actions">
+              <button
+                type="button"
+                className="mod-action"
+                onClick={() => {
+                  setEditingMod({ id: expandedMod.id, prompt: expandedMod.prompt });
+                  setInput(expandedMod.prompt);
+                  commandInputRef.current?.focus();
+                }}
+              >
+                <Pencil aria-hidden="true" /> Change
+              </button>
+              <button
+                type="button"
+                className="mod-action danger"
+                onClick={() => {
+                  setExpandedModId(null);
+                  void removeMod(expandedMod);
+                }}
+              >
+                <Trash2 aria-hidden="true" /> Remove
+              </button>
+            </div>
+          </article>
+        ) : null}
       </section>
 
-      {rules.length ? (
-        <section className="rules-strip" aria-label="Memory rules">
-          {rules.slice(0, 3).map((rule) => (
-            <span key={rule}>{rule}</span>
-          ))}
-        </section>
+      {editingMod ? (
+        <div className="editing-pill">
+          <span>Changing mod</span>
+          <button
+            type="button"
+            onClick={() => {
+              setEditingMod(null);
+              setInput("");
+            }}
+          >
+            Cancel
+          </button>
+        </div>
       ) : null}
-
       <form className="composer" onSubmit={handleSubmit}>
-        <textarea
+        <input
+          ref={commandInputRef}
           value={input}
           onChange={(event) => setInput(event.target.value)}
-          placeholder="Ask conjure to build a browser customization..."
-          rows={3}
+          placeholder="Build a mod or find something…"
+          disabled={busy}
+          aria-label="What should Conjure do?"
         />
-        <button type="submit" title="Send message" className="send-button" disabled={!input.trim()}>
+        <button
+          type="submit"
+          title="Run"
+          className="send-button"
+          disabled={busy || !input.trim()}
+        >
           <Send aria-hidden="true" />
         </button>
       </form>

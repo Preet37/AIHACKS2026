@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-AgentProvider = Literal["devin", "claude", "nemotron"]
+AgentProvider = Literal["devin", "claude", "groq", "nemotron"]
 
 try:
     from dotenv import load_dotenv
@@ -47,6 +47,8 @@ class Settings:
     devin_max_poll_attempts: int = 720
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-4-6"
+    groq_api_key: str | None = None
+    groq_model: str = "qwen/qwen3-32b"
     nvidia_api_key: str | None = None
     nvidia_model: str = "nvidia/nemotron-3-super-120b-a12b"
     nvidia_api_base_url: str | None = None
@@ -58,6 +60,10 @@ class Settings:
     browse_model: str = "anthropic/claude-sonnet-4-6"
     browse_max_results: int = 6
     browse_max_steps: int = 6
+    browserbase_session_region: str | None = None
+    browse_use_proxies: bool = True
+    browse_verified: bool = False
+    browse_advanced_stealth: bool = False
     demo_mode: bool = False
     project_root: Path = Path("demo_code")
     terminal_timeout_seconds: int = 30
@@ -72,6 +78,8 @@ class Settings:
             return True
         if self.agent_provider == "claude":
             return not self.anthropic_api_key
+        if self.agent_provider == "groq":
+            return not self.groq_api_key
         if self.agent_provider == "nemotron":
             return not self.nvidia_api_key
         return not (self.devin_api_key and self.devin_org_id)
@@ -93,6 +101,8 @@ def load_settings() -> Settings:
         devin_max_poll_attempts=_env_int("DEVIN_MAX_POLL_ATTEMPTS", 720),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
         anthropic_model=os.getenv("CONJURE_ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+        groq_api_key=os.getenv("GROQ_API_KEY"),
+        groq_model=os.getenv("CONJURE_GROQ_MODEL", "qwen/qwen3-32b"),
         nvidia_api_key=os.getenv("NVIDIA_API_KEY"),
         nvidia_model=os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3-super-120b-a12b"),
         nvidia_api_base_url=os.getenv("NVIDIA_API_BASE_URL"),
@@ -104,6 +114,10 @@ def load_settings() -> Settings:
         browse_model=os.getenv("BROWSE_MODEL", "anthropic/claude-sonnet-4-6"),
         browse_max_results=_env_int("BROWSE_MAX_RESULTS", 6),
         browse_max_steps=_env_int("BROWSE_MAX_STEPS", 6),
+        browserbase_session_region=os.getenv("BROWSERBASE_SESSION_REGION") or None,
+        browse_use_proxies=_env_bool("BROWSE_USE_PROXIES", True),
+        browse_verified=_env_bool("BROWSE_VERIFIED", False),
+        browse_advanced_stealth=_env_bool("BROWSE_ADVANCED_STEALTH", False),
         demo_mode=_env_bool("CONJURE_DEMO_MODE", False),
         project_root=Path(os.getenv("CONJURE_PROJECT_ROOT", "demo_code")),
         terminal_timeout_seconds=_env_int("CONJURE_TERMINAL_TIMEOUT_SECONDS", 30),
@@ -136,6 +150,8 @@ def _env_provider(name: str, default: AgentProvider) -> AgentProvider:
     raw = os.getenv(name, default).strip().lower()
     if raw == "claude":
         return "claude"
+    if raw == "groq":
+        return "groq"
     if raw == "nemotron":
         return "nemotron"
     return "devin"

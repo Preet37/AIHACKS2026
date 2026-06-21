@@ -274,8 +274,21 @@ async def grep_search(pattern: str, path: str = ".") -> str:
     return _json({"matches": matches, "truncated": len(matches) >= settings.grep_max_matches})
 
 
-async def create_file(path: str, content: str) -> str:
+def _missing_file_path_error(tool_name: str) -> str:
+    return _json(
+        {
+            "error": (
+                f"{tool_name} requires a path. Retry with "
+                f'{{"path": "relative/file/name", "content": "..."}}.'
+            )
+        }
+    )
+
+
+async def create_file(path: str = "", content: str = "") -> str:
     """Create a new file in the project workspace. Fails if the file already exists."""
+    if not path.strip():
+        return _missing_file_path_error("create_file")
     target = _resolve_path(path)
     if target.exists():
         return _json({"error": f"File already exists: {path}"})
@@ -284,11 +297,13 @@ async def create_file(path: str, content: str) -> str:
     return _json({"created": path, "bytes": len(content.encode("utf-8"))})
 
 
-async def write_file(path: str, content: str) -> str:
+async def write_file(path: str = "", content: str = "") -> str:
     """Create or overwrite a file in the project workspace.
 
     Unlike create_file, this succeeds whether or not the file already exists, so
     the agent can iterate on a previously generated file."""
+    if not path.strip():
+        return _missing_file_path_error("write_file")
     target = _resolve_path(path)
     existed = target.exists()
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -302,13 +317,22 @@ async def write_file(path: str, content: str) -> str:
     )
 
 
-async def edit_file(path: str, code_edit: str, instructions: str = "") -> str:
+async def edit_file(path: str = "", code_edit: str = "", instructions: str = "") -> str:
     """Apply a minimal edit to an existing file.
 
     Use the marker '// ... existing code ...' to represent unchanged regions; a
     secondary model merges the edit into the full file. When no model is
     available, `code_edit` must be the complete new file content (no markers).
     """
+    if not path.strip():
+        return _json(
+            {
+                "error": (
+                    "edit_file requires a path. Retry with "
+                    '{"path": "relative/file/name", "code_edit": "..."}.'
+                )
+            }
+        )
     target = _resolve_path(path)
     if not target.exists():
         return _json({"error": f"File does not exist; use create_file instead: {path}"})
@@ -507,6 +531,15 @@ async def start_mod(prompt: str, name: str = "", mod_id: str | None = None) -> s
     from . import mods
 
     project_dir = _project_dir()
+    # New local build turns are assigned a provisional mod before the model
+    # starts. If the model still calls start_mod without echoing that id, keep
+    # using the assigned workspace instead of creating a second/overwriting mod.
+    active = _active_mod_dir_var.get()
+    if mod_id is None and active is not None:
+        candidate_id = active.name
+        if active.parent == mods.mods_root(project_dir).resolve() and mods.get_mod(project_dir, candidate_id):
+            mod_id = candidate_id
+
     if mod_id:
         existing = mods.get_mod(project_dir, mod_id)
         if existing is None:

@@ -85,6 +85,15 @@ Then in Chrome:
 
 The side panel should open. Type a prompt. In demo mode, the backend should stream simulated progress phrases for the selected provider.
 
+For real Anthropic or Groq runs, open `chrome://extensions`, select Conjure's
+**Details**, then **Extension options**. Select the provider, paste its API key, and
+click **Save**. The key is saved in extension-local Chrome storage (not encrypted),
+with access restricted to trusted extension pages, and sent only to the local backend
+for the run. It is never bundled into the extension or persisted by the backend. On
+shared machines, use the `.env` fallback instead and clear the extension setting.
+If an agent call fails, use **Show logs** on that same page to inspect the sanitized
+Groq/backend error. Stored diagnostic logs never include the full API key.
+
 ## 7. Test Real Devin Sessions
 
 Edit `.env`:
@@ -101,7 +110,9 @@ DEVIN_BRANCH=feat/Devin
 
 Restart the backend after changing `.env`.
 
-Keep Devin and other private keys server-side only. Do not put private keys in any `VITE_*` variable because those are bundled into the Chrome extension.
+Keep Devin keys server-side. Anthropic/Groq keys may be supplied through the Chrome
+Extension options page above. Never put private keys in a `VITE_*` variable because those
+are bundled into the extension code.
 
 ## 8. Test Real Claude Local Tool Loop
 
@@ -253,9 +264,11 @@ Setup:
 ```powershell
 # 1. backend deps include `stagehand` and `playwright`:
 python -m pip install -r .\backend\requirements.txt
-# 2. set in .env (Browserbase keys + the LLM key Stagehand uses):
-#    BROWSERBASE_API_KEY=...   BROWSERBASE_PROJECT_ID=...   ANTHROPIC_API_KEY=...
+# 2. set in .env (Browserbase Model Gateway supplies the model; no provider key needed):
+#    BROWSERBASE_API_KEY=...   BROWSERBASE_PROJECT_ID=...
 #    optional: BROWSE_MODEL=anthropic/claude-sonnet-4-6  BROWSE_MAX_RESULTS=6  BROWSE_MAX_STEPS=6
+#    BROWSE_USE_PROXIES=true
+#    Scale-plan only: BROWSE_VERIFIED=true  BROWSE_ADVANCED_STEALTH=true
 ```
 
 No Docker needed for this feature — Browserbase is a cloud service. (Redis/AgentSpan
@@ -264,7 +277,13 @@ containers from `docker compose up -d` are unrelated to the finder now.)
 Flow + contract:
 - The extension sends `POST /projects/{id}/agent-task` with `{task, url, cookies}` (the
   current tab URL + `chrome.cookies` for that URL).
-- Response: `{findings:[{title,url,image,price,note}], session_id, replay_url}`.
+- Navigation and extraction use Stagehand's managed Browserbase APIs. Sessions enable
+  built-in proxies, CAPTCHA solving/waiting, logs, recordings, ad blocking, self-healing,
+  SDK retries, Model Gateway inference, and optional region selection. Playwright is used
+  only to inject cookies.
+- Response: `{findings:[{title,url,image,price,note}], session_id, replay_url}` with zero or
+  one finding. Its destination is loaded in the same Browserbase session and accepted only
+  when the final response is HTTP 2xx/3xx (never a 404).
 - Watch the run live/after at `replay_url` (a `browserbase.com/sessions/...` link).
 
 Notes:

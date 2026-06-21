@@ -25,11 +25,12 @@ Fill in real values for the selected coding provider, Redis, Browserbase, Simula
 
 Required config groups:
 
-- Agent provider: `CONJURE_AGENT_PROVIDER=devin` for Devin cloud sessions, `CONJURE_AGENT_PROVIDER=claude` for the Claude local tool loop, or `CONJURE_AGENT_PROVIDER=nemotron` for the NVIDIA Nemotron local tool loop
+- Agent provider: the extension can select Anthropic or Groq per run; `.env` can use `devin`, `claude`, `groq`, or `nemotron` as the backend fallback
 - Devin: `DEVIN_API_KEY`, `DEVIN_ORG_ID`, API base URL, agent mode, repositories, branch, and polling settings
 - Claude: `ANTHROPIC_API_KEY` and `CONJURE_ANTHROPIC_MODEL`
+- Groq: `GROQ_API_KEY` and `CONJURE_GROQ_MODEL`
 - Nemotron: `NVIDIA_API_KEY`, `NVIDIA_MODEL`, and optional `NVIDIA_API_BASE_URL` for self-hosted NIM
-- Off-device finder (side-panel "Find on this page"): runs a Browserbase cloud browser driven by Stagehand. Needs `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, `ANTHROPIC_API_KEY` (the LLM key Stagehand uses), and optional `BROWSE_MODEL` (default `anthropic/claude-sonnet-4-6`), `BROWSE_MAX_RESULTS`, `BROWSE_MAX_STEPS`. Install the SDK via `backend/requirements.txt` (`stagehand`)
+- Off-device finder: runs a Browserbase cloud browser driven by Stagehand and Browserbase Model Gateway. Needs `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, and optional `BROWSE_MODEL`, `BROWSE_MAX_RESULTS`, `BROWSE_MAX_STEPS`
 - Orkes AgentSpan (alternate finder engine, over posted HTML): `agentspan server start` (serves `http://localhost:6767`), `AGENTSPAN_SERVER_URL`, `AGENTSPAN_LLM_MODEL`, `AGENTSPAN_MAX_RESULTS`
 - Redis: `REDIS_URL`, `REDIS_NAMESPACE`, sandbox cache TTL
 - Browserbase: API key, project ID, session settings
@@ -64,7 +65,7 @@ npm --prefix conjure-extension install
 npm run dev:extension
 ```
 
-For manual Chrome testing, build the extension and load the unpacked output directory from Chrome's Extensions page. Keep Devin, Claude, Nemotron, and other provider keys server-side; the extension should use `VITE_BACKEND_URL` and `VITE_BACKEND_WS_URL` only.
+For manual Chrome testing, build the extension and load the unpacked output directory from Chrome's Extensions page. Add Anthropic/Groq keys through `chrome://extensions` → Conjure → **Details** → **Extension options**. They are stored in extension-local Chrome storage (not encrypted), restricted to trusted extension pages, and sent to the local backend per run. Sanitized agent failures are available under **Show logs** on the same page. Never expose any key through a `VITE_*` variable.
 
 ## Dev Commands
 

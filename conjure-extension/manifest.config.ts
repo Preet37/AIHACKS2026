@@ -12,6 +12,10 @@ export default defineManifest((env) => ({
   side_panel: {
     default_path: "index.html"
   },
+  options_ui: {
+    page: "src/options/index.html",
+    open_in_tab: true
+  },
   background: {
     service_worker: "src/background.ts",
     type: "module"

@@ -84,7 +84,7 @@ class ConjureAgent:
                 yield event
             return
 
-        if self.settings.agent_provider in {"claude", "nemotron"}:
+        if self.settings.agent_provider in {"claude", "groq", "nemotron"}:
             async for event in self._stream_local_tool_loop_response(
                 provider=self.settings.agent_provider,
                 query=query,
@@ -322,7 +322,17 @@ class ConjureAgent:
                 while not outbound.empty():
                     yield outbound.get_nowait()
 
-                result = await task
+                try:
+                    result = await task
+                except Exception as exc:
+                    # A malformed model-generated call should become corrective
+                    # tool feedback, not terminate the entire agent workflow.
+                    result = {
+                        "error": (
+                            f"{name} could not run: {exc}. Correct the arguments and "
+                            "call the tool again. File tools require a relative 'path'."
+                        )
+                    }
                 yield {"type": "tool_end", "name": name, "result": _stringify_result(result)}
                 messages.append(ToolMessage(content=_stringify_result(result), tool_call_id=call_id))
 
@@ -355,6 +365,19 @@ class ConjureAgent:
             if self.settings.nvidia_api_base_url:
                 kwargs["base_url"] = self.settings.nvidia_api_base_url
             return ChatNVIDIA(**kwargs).bind_tools(tools)
+
+        if provider == "groq":
+            try:
+                from langchain_groq import ChatGroq
+            except ImportError as exc:
+                raise RuntimeError(
+                    "Groq provider requires langchain-groq."
+                ) from exc
+
+            return ChatGroq(
+                model=self.settings.groq_model,
+                api_key=self.settings.groq_api_key,
+            ).bind_tools(tools)
 
         raise RuntimeError(f"Unsupported local tool-loop provider: {provider}")
 
@@ -611,6 +634,8 @@ def _provider_label(provider: str) -> str:
         return "Claude"
     if provider == "nemotron":
         return "Nemotron"
+    if provider == "groq":
+        return "Groq"
     return "Devin"
 
 

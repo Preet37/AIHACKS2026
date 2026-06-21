@@ -6,22 +6,30 @@ are handed off into that cloud session (Playwright ``add_cookies`` over CDP) so 
 as the logged-in user, off-device. Returns structured findings plus a Browserbase
 replay URL so the run can be watched.
 
-Flow: start session -> attach Playwright over CDP -> inject cookies -> goto start URL
--> extract matching items -> if none, run the autonomous agent to search/scroll, then
-extract again -> normalize -> return findings + session_id + replay_url.
+Flow: start a managed Stagehand session with Browserbase reliability features -> attach
+Playwright over CDP only to inject cookies -> navigate/extract through Stagehand -> if
+needed, run its autonomous agent -> normalize -> return findings + replay URL.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import json
+import re
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import parse_qs, quote_plus, urljoin, urlparse, urlunparse
 
 from .agentspan_finder import _normalize_items
 
 
 DEFAULT_BROWSE_MODEL = "anthropic/claude-sonnet-4-6"
 BROWSERBASE_SESSION_URL = "https://www.browserbase.com/sessions/{session_id}"
+FINAL_RESULT_LIMIT = 1
+FAST_CANDIDATE_LIMIT = 3
+
+_SEARCH_PATH_MARKERS = ("/search", "/search/", "/search-results", "/searchresults", "/sch/")
+_SEARCH_QUERY_KEYS = {"s", "k", "q", "query", "search", "keyword", "_nkw"}
 
 # JSON schema Stagehand validates the extraction against.
 _ITEMS_SCHEMA: dict[str, Any] = {
@@ -54,9 +62,12 @@ class BrowserAgentSettings:
     browserbase_api_key: str | None = None
     browserbase_project_id: str | None = None
     model: str = DEFAULT_BROWSE_MODEL
-    model_api_key: str | None = None
     max_results: int = 6
     max_steps: int = 6
+    region: str | None = None
+    use_proxies: bool = True
+    verified: bool = False
+    advanced_stealth: bool = False
 
 
 class BrowserAgentError(RuntimeError):
@@ -73,8 +84,6 @@ def missing_requirement(settings: BrowserAgentSettings) -> str | None:
         return "BROWSERBASE_API_KEY is not configured on the backend"
     if not settings.browserbase_project_id:
         return "BROWSERBASE_PROJECT_ID is not configured on the backend"
-    if not settings.model_api_key:
-        return f"The model API key (for '{settings.model}') is not configured on the backend"
     return None
 
 
@@ -104,11 +113,18 @@ async def find_items_remote(
         async with AsyncStagehand(
             browserbase_api_key=settings.browserbase_api_key,
             browserbase_project_id=settings.browserbase_project_id,
-            model_api_key=settings.model_api_key,
+            max_retries=2,
+            timeout=90.0,
         ) as client:
+            session_params = _browserbase_session_params(settings)
             session = await client.sessions.start(
                 model_name=settings.model,
                 browser={"type": "browserbase"},
+                browserbase_session_create_params=session_params,
+                self_heal=True,
+                wait_for_captcha_solves=True,
+                act_timeout_ms=20_000,
+                dom_settle_timeout_ms=1_500,
             )
             session_id = _session_field(session, "session_id")
             cdp_url = _session_field(session, "cdp_url")
@@ -133,7 +149,7 @@ async def find_items_remote(
     except Exception as exc:  # network / Stagehand / Browserbase failure
         raise BrowserAgentError(f"Off-device browse failed: {exc}") from exc
 
-    findings = _normalize_items(items, page_url=start_url, limit=settings.max_results)
+    findings = _normalize_items(items, page_url=start_url, limit=FINAL_RESULT_LIMIT)
     return {"findings": findings, "session_id": session_id or "", "replay_url": replay_url}
 
 
@@ -147,8 +163,50 @@ async def _drive_session(
     playwright_cookies: list[dict[str, Any]],
     async_playwright: Any,
 ) -> list[dict[str, Any]]:
+    async def browse_with_stagehand(browser_context: Any | None = None) -> list[dict[str, Any]]:
+        browse_url = _fast_shopping_search_url(start_url, task) or start_url
+        await _navigate_with_agent_fallback(session, browse_url, settings)
+        candidate_limit = max(1, min(settings.max_results, FAST_CANDIDATE_LIMIT))
+
+        # Fast path: read real product anchors directly from the Browserbase-hosted
+        # page. This avoids an LLM round trip on ordinary search/results pages.
+        page = None
+        if browser_context is not None:
+            pages = getattr(browser_context, "pages", [])
+            page = pages[-1] if pages else None
+        dom_candidates = await _extract_dom_items(page, task, browse_url, candidate_limit)
+        verified = await _first_reachable_item(session, dom_candidates, browse_url)
+        if verified:
+            return [verified]
+        if dom_candidates:
+            await _navigate_with_agent_fallback(session, browse_url, settings)
+
+        candidates = await _extract_items(session, task, candidate_limit)
+        verified = await _first_reachable_item(session, candidates, browse_url)
+        if verified:
+            return [verified]
+
+        # If extraction found the right product but returned the listing page URL,
+        # a single Stagehand act is much faster than launching the multi-step agent.
+        # Click that named result, extract its canonical detail link, then verify it.
+        if candidates and await _click_best_candidate(session, candidates[0], task):
+            detail_candidates = await _extract_items(session, task, 1, detail_page=True)
+            verified = await _first_reachable_item(session, detail_candidates, browse_url)
+            if verified:
+                return [verified]
+
+        # Candidate validation navigates away from the results page. Return to the
+        # requested site before asking the managed agent to surface alternatives.
+        await _navigate_with_agent_fallback(session, browse_url, settings)
+        await _run_search_agent(session, task, settings)
+        candidates = await _extract_items(session, task, candidate_limit, detail_page=True)
+        verified = await _first_reachable_item(session, candidates, browse_url)
+        return [verified] if verified else []
+
     if not cdp_url:
-        raise BrowserAgentError("Browserbase did not return a CDP url for the session")
+        if playwright_cookies:
+            raise BrowserAgentError("Browserbase did not return a CDP url for cookie handoff")
+        return await browse_with_stagehand()
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.connect_over_cdp(cdp_url)
@@ -160,49 +218,377 @@ async def _drive_session(
                 except Exception:
                     # A malformed cookie shouldn't abort the whole run.
                     pass
-            page = context.pages[0] if context.pages else await context.new_page()
-            await page.goto(start_url, wait_until="domcontentloaded")
-
-            items = await _extract_items(session, page, task, settings.max_results)
-            if not items:
-                await _run_search_agent(session, page, task, settings)
-                items = await _extract_items(session, page, task, settings.max_results)
-            return items
+            return await browse_with_stagehand(context)
         finally:
             await browser.close()
 
 
-async def _extract_items(
-    session: Any, page: Any, task: str, max_results: int
+async def _extract_dom_items(
+    page: Any | None,
+    task: str,
+    page_url: str,
+    max_results: int,
 ) -> list[dict[str, Any]]:
+    """Extract and rank visible product anchors without an LLM round trip."""
+    if page is None:
+        return []
+    try:
+        raw = await page.evaluate(
+            r"""
+            () => {
+              const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
+              const selectors = [
+                '[data-component-type="s-search-result"]',
+                '[data-testid*="product"]',
+                '[class*="product-card"]',
+                '[class*="ProductCard"]',
+                'article',
+                'li'
+              ];
+              const rows = [];
+              for (const anchor of document.querySelectorAll('a[href]')) {
+                let url;
+                try { url = new URL(anchor.getAttribute('href'), location.href).href; }
+                catch { continue; }
+                if (!url.startsWith('http://') && !url.startsWith('https://')) continue;
+                const image = anchor.querySelector('img') || anchor.closest('div')?.querySelector('img');
+                const title = clean(anchor.innerText) || clean(image?.alt) || clean(anchor.getAttribute('aria-label'));
+                if (!title || title.length < 3) continue;
+                let card = null;
+                for (const selector of selectors) {
+                  card = anchor.closest(selector);
+                  if (card) break;
+                }
+                card ||= anchor.parentElement;
+                const text = clean(card?.innerText).slice(0, 600);
+                const price = text.match(/(?:\$|£|€)\s?\d+(?:[,.]\d{2})?/)?.[0] || '';
+                rows.push({
+                  title: title.slice(0, 240),
+                  url,
+                  image: image?.currentSrc || image?.src || '',
+                  price,
+                  note: text.slice(0, 180)
+                });
+              }
+              return rows.slice(0, 250);
+            }
+            """
+        )
+    except Exception:
+        return []
+    if not isinstance(raw, list):
+        return []
+    return _rank_dom_items(raw, task, page_url, max_results)
+
+
+def _rank_dom_items(
+    raw_items: list[Any],
+    task: str,
+    page_url: str,
+    max_results: int,
+) -> list[dict[str, Any]]:
+    task_tokens = {
+        token
+        for token in re.findall(r"[a-z0-9]+", task.lower())
+        if len(token) > 2
+        and token not in {"find", "search", "look", "under", "with", "this", "that", "page"}
+        and not token.isdigit()
+    }
+    max_price_match = re.search(r"(?:under|below|less than|max(?:imum)?)\s*\$?\s*(\d+(?:\.\d+)?)", task, re.I)
+    max_price = float(max_price_match.group(1)) if max_price_match else None
+    seen: set[str] = set()
+    ranked: list[tuple[int, int, dict[str, Any]]] = []
+    for index, raw in enumerate(raw_items):
+        if not isinstance(raw, dict):
+            continue
+        url = raw.get("url")
+        title = raw.get("title")
+        if not isinstance(url, str) or not isinstance(title, str):
+            continue
+        absolute_url = urljoin(page_url, url)
+        if absolute_url in seen or not _is_product_destination(
+            absolute_url, page_url, allow_redirect=True
+        ):
+            continue
+        seen.add(absolute_url)
+        haystack = f"{title} {raw.get('note', '')}".lower()
+        score = sum(3 if token in title.lower() else 1 for token in task_tokens if token in haystack)
+        if task_tokens and score == 0:
+            continue
+        price = str(raw.get("price") or "")
+        price_match = re.search(r"\d+(?:[,.]\d{2})?", price.replace(",", ""))
+        if max_price is not None and price_match and float(price_match.group()) > max_price:
+            continue
+        item = {
+            "title": title.strip(),
+            "url": absolute_url,
+            "image": str(raw.get("image") or ""),
+            "price": price,
+            "note": str(raw.get("note") or "")[:120],
+        }
+        ranked.append((score, -index, item))
+    ranked.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
+    return [item for _, _, item in ranked[:max_results]]
+
+
+def _fast_shopping_search_url(start_url: str, task: str) -> str | None:
+    """Turn a supported shop homepage into its results URL without an agent run."""
+    parsed = urlparse(start_url)
+    host = parsed.netloc.lower().split(":", 1)[0]
+    if (parsed.path.rstrip("/") or "/") != "/" or parsed.query:
+        return None
+    query = re.sub(
+        r"^(?:please\s+)?(?:find|search(?:\s+for)?|look\s+for|shop\s+for)\s+",
+        "",
+        task.strip(),
+        flags=re.I,
+    )
+    query = re.sub(r"^(?:me\s+)?(?:one\s+)?(?:verified\s+)?(?:a|an|the)?\s*", "", query, flags=re.I)
+    query = re.sub(
+        r"\b(?:under|below|less\s+than|max(?:imum)?(?:\s+of)?)\s*\$?\s*\d+(?:\.\d+)?\b",
+        "",
+        query,
+        flags=re.I,
+    )
+    query = re.sub(r"\b(?:on|from)\s+(?:this|the\s+current)\s+(?:page|site)\b", "", query, flags=re.I)
+    query = " ".join(query.split()).strip(" .,-") or task.strip()
+    encoded = quote_plus(query)
+    origin = f"{parsed.scheme or 'https'}://{parsed.netloc}"
+    if "amazon." in host:
+        return f"{origin}/s?k={encoded}"
+    if host.endswith("ebay.com") or ".ebay." in host:
+        return f"{origin}/sch/i.html?_nkw={encoded}"
+    if "walmart." in host:
+        return f"{origin}/search?q={encoded}"
+    if host.endswith("etsy.com") or ".etsy." in host:
+        return f"{origin}/search?q={encoded}"
+    return None
+
+
+async def _navigate_with_agent_fallback(
+    session: Any,
+    start_url: str,
+    settings: BrowserAgentSettings,
+) -> None:
+    """Use Stagehand's managed navigation, then its agent as the documented failsafe."""
+    try:
+        await session.navigate(url=start_url)
+        return
+    except Exception as navigation_error:
+        try:
+            await session.execute(
+                execute_options={
+                    "instruction": (
+                        f"Navigate directly to {start_url}. Wait for the page to load and do "
+                        "not leave this website."
+                    ),
+                    "max_steps": max(2, min(settings.max_steps, 4)),
+                },
+                agent_config={"model": settings.model},
+            )
+            return
+        except Exception as agent_error:
+            raise BrowserAgentError(
+                "Browserbase could not navigate to the requested page after managed "
+                f"Stagehand navigation and agent fallback: {navigation_error}; {agent_error}"
+            ) from agent_error
+
+
+async def _extract_items(
+    session: Any,
+    task: str,
+    max_results: int,
+    *,
+    detail_page: bool = False,
+) -> list[dict[str, Any]]:
+    location_rule = (
+        "The browser should now be on a product-detail page. Use that page's canonical "
+        "absolute product URL."
+        if detail_page
+        else "Read the href from the anchor around each exact product title/card."
+    )
     instruction = (
         f"Find the products on this page that best match: {task}. "
         f"Return up to {max_results} items, best matches first. "
         "Only include items actually present on the page. "
+        f"{location_rule} "
+        "The item URL MUST open that individual product's detail page. Never return the "
+        "current search, category, home, or results URL. On Amazon, return a /dp/ or "
+        "/gp/product/ URL (a sponsored redirect is acceptable only if it resolves there). "
         "Use absolute http(s) URLs for both the item link and the image."
     )
-    response = await session.extract(instruction=instruction, schema=_ITEMS_SCHEMA, page=page)
+    response = await session.extract(instruction=instruction, schema=_ITEMS_SCHEMA)
     return _items_from_result(_response_result(response))
 
 
-async def _run_search_agent(
-    session: Any, page: Any, task: str, settings: BrowserAgentSettings
-) -> None:
+async def _click_best_candidate(
+    session: Any,
+    candidate: dict[str, Any],
+    task: str,
+) -> bool:
+    """Open one named result with Stagehand's single-action fast path."""
+    title = candidate.get("title")
+    if not isinstance(title, str) or not title.strip() or not hasattr(session, "act"):
+        return False
+    instruction = (
+        f"Click the product title/link {json.dumps(title.strip())} that best matches "
+        f"{json.dumps(task.strip())}. Open its individual product-detail page, not a "
+        "search, category, sponsored-results, or comparison page."
+    )
+    try:
+        await session.act(input=instruction)
+        return True
+    except Exception:
+        return False
+
+
+async def _first_reachable_item(
+    session: Any,
+    candidates: list[dict[str, Any]],
+    page_url: str,
+) -> dict[str, Any] | None:
+    """Return the first candidate whose destination succeeds in Browserbase."""
+    for candidate in candidates:
+        raw_url = candidate.get("url")
+        if not isinstance(raw_url, str) or not raw_url.strip():
+            continue
+        url = urljoin(page_url, raw_url.strip())
+        if urlparse(url).scheme not in {"http", "https"}:
+            continue
+        if not _is_product_destination(url, page_url, allow_redirect=True):
+            continue
+
+        try:
+            response = await session.navigate(url=url)
+        except Exception:
+            # A destination we cannot load cannot be presented as verified.
+            continue
+
+        status, final_url = _navigation_response(response)
+        if status is None or not 200 <= status < 400:
+            continue
+        destination = final_url or url
+        if not _is_product_destination(destination, page_url):
+            continue
+
+        verified = dict(candidate)
+        verified["url"] = _canonical_product_url(destination)
+        return verified
+    return None
+
+
+def _is_product_destination(
+    url: str,
+    page_url: str,
+    *,
+    allow_redirect: bool = False,
+) -> bool:
+    """Reject home/search/listing URLs and require known shops' detail routes."""
+    parsed = urlparse(url)
+    source = urlparse(page_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False
+
+    canonical = urlunparse(parsed._replace(fragment=""))
+    source_canonical = urlunparse(source._replace(fragment=""))
+    if canonical == source_canonical:
+        return False
+
+    path = parsed.path.rstrip("/").lower() or "/"
+    query_keys = {key.lower() for key in parse_qs(parsed.query)}
+    if path == "/s" or any(marker in path for marker in _SEARCH_PATH_MARKERS):
+        return False
+    if path == "/" and query_keys & _SEARCH_QUERY_KEYS:
+        return False
+
+    host = parsed.netloc.lower().split(":", 1)[0]
+    if "amazon." in host:
+        if allow_redirect and path.startswith("/sspa/click"):
+            return True
+        return "/dp/" in path or "/gp/product/" in path
+    if host.endswith("ebay.com") or ".ebay." in host:
+        return "/itm/" in path
+    if "walmart." in host:
+        return "/ip/" in path
+    if host.endswith("etsy.com") or ".etsy." in host:
+        return "/listing/" in path
+    return path != "/"
+
+
+def _canonical_product_url(url: str) -> str:
+    """Remove tracking noise when a stable product-detail route is known."""
+    parsed = urlparse(url)
+    host = parsed.netloc.lower().split(":", 1)[0]
+    if "amazon." in host:
+        match = re.search(r"/(?:dp|gp/product)/([A-Z0-9]{10})(?:[/?]|$)", parsed.path, re.I)
+        if match:
+            return urlunparse((parsed.scheme, parsed.netloc, f"/dp/{match.group(1)}", "", "", ""))
+    return urlunparse(parsed._replace(fragment=""))
+
+
+def _navigation_response(response: Any) -> tuple[int | None, str | None]:
+    """Read the final HTTP status/URL from Stagehand's managed navigation result."""
+    result = _response_result(response)
+    navigation = result.get("response") if isinstance(result, dict) else None
+    if not isinstance(navigation, dict):
+        return None, None
+
+    raw_status = navigation.get("status")
+    status = raw_status if isinstance(raw_status, int) and not isinstance(raw_status, bool) else None
+    raw_url = navigation.get("url")
+    url = raw_url if isinstance(raw_url, str) and raw_url.startswith(("http://", "https://")) else None
+    return status, url
+
+
+async def _run_search_agent(session: Any, task: str, settings: BrowserAgentSettings) -> None:
     """Autonomous fallback: let the agent search/scroll to surface results."""
     instruction = (
         f"On this website, find products matching: {task}. "
-        "If results are not visible, use the site's search box and scroll to load them. "
-        "Stay on this site; do not navigate to a different website."
+        "If results are not visible, use the site's search box. Choose the best matching "
+        "result, click its title, and STOP on that individual product-detail page. "
+        "Do not stop on a search, category, comparison, or sponsored-results page. Stay "
+        "on this site; do not navigate to a different website."
     )
     try:
         await session.execute(
-            execute_options={"instruction": instruction, "max_steps": settings.max_steps},
-            agent_config={"model": {"model_name": settings.model, "api_key": settings.model_api_key}},
-            page=page,
+            execute_options={
+                "instruction": instruction,
+                "max_steps": max(2, min(settings.max_steps, 4)),
+            },
+            agent_config={"model": settings.model},
         )
     except Exception:
         # Best-effort navigation; we still try to extract whatever is on the page.
         return
+
+
+def _browserbase_session_params(
+    settings: BrowserAgentSettings,
+) -> dict[str, Any]:
+    """Browserbase-native reliability and observability settings for every browse."""
+    browser_settings: dict[str, Any] = {
+        "block_ads": True,
+        "solve_captchas": True,
+        "log_session": True,
+        "record_session": True,
+    }
+    if settings.verified:
+        browser_settings["verified"] = True
+    if settings.advanced_stealth:
+        browser_settings["advanced_stealth"] = True
+
+    params: dict[str, Any] = {
+        "project_id": settings.browserbase_project_id,
+        "proxies": settings.use_proxies,
+        "timeout": 900,
+        "browser_settings": browser_settings,
+        "user_metadata": {
+            "conjureFeature": "off-device-finder",
+        },
+    }
+    if settings.region:
+        params["region"] = settings.region
+    return params
 
 
 def _items_from_result(result: Any) -> list[dict[str, Any]]:

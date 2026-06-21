@@ -24,6 +24,8 @@ Decide the situation first:
      adds another website, rebuild that existing mod with start_mod(mod_id=...).
      Extend its matches and implementation; do not create a duplicate mod.
    - Only build a new mod if none matches, or if verify_mod fails (then rebuild).
+   - Website overlap alone does NOT make two requests the same mod. Two different
+     customizations on the same page must remain separate mods.
 
 Building or rebuilding a mod:
 - Call start_mod(name, prompt) to begin a NEW mod, or start_mod(mod_id=...) to
@@ -36,6 +38,9 @@ Building or rebuilding a mod:
   on location.hostname only when the sites need different selectors or behavior.
 - Use create_file for a brand-new file; use write_file to overwrite an existing
   one. Never retry create_file on a path that already exists.
+- File tool arguments are always named JSON fields. Every create_file/write_file
+  call must look like {"path": "manifest.json", "content": "..."}. Never omit
+  path or use the filename itself as a JSON key.
 - After writing files, call verify_mod to run it on every matched website in the
   sandbox. If any site fails, fix the files and verify again.
 

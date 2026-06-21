@@ -208,6 +208,13 @@ const captureException = (error: unknown) => {
   }
 };
 
+// API keys live in chrome.storage.local for persistence, but content scripts do
+// not need storage access. Keep credentials available only to trusted extension
+// pages (the side panel and service worker).
+chrome.storage.local
+  .setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })
+  .catch(captureException);
+
 const makeId = () =>
   globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 

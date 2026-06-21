@@ -1,11 +1,14 @@
+import asyncio
+
 from fastapi.testclient import TestClient
 
-from backend.main import app
+from backend.main import _agent_with_client_provider, app
 import pytest
 
 from backend.utils.agent import ConjureAgent
 from backend.utils.config import Settings, load_settings
 from backend.utils.store import InMemoryStore
+from backend.utils.tools import get_langchain_tools, invoke_tool
 
 
 def test_health_endpoint_reports_ok():
@@ -15,6 +18,15 @@ def test_health_endpoint_reports_ok():
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "conjure-backend"}
+
+
+def test_file_tool_schema_allows_model_to_receive_corrective_missing_path_result():
+    create_tool = next(tool for tool in get_langchain_tools() if tool.name == "create_file")
+    required = create_tool.args_schema.model_json_schema().get("required", [])
+
+    assert "path" not in required
+    result = asyncio.run(invoke_tool("create_file", {"content": "hello"}))
+    assert "requires a path" in result
 
 
 def test_effective_demo_mode_depends_on_selected_provider(tmp_path):
@@ -34,6 +46,11 @@ def test_effective_demo_mode_depends_on_selected_provider(tmp_path):
         nvidia_api_key="nvapi-test",
         project_root=tmp_path,
     ).effective_demo_mode
+    assert not Settings(
+        agent_provider="groq",
+        groq_api_key="gsk_test",
+        project_root=tmp_path,
+    ).effective_demo_mode
     assert Settings(
         agent_provider="claude",
         devin_api_key="cog_test",
@@ -46,6 +63,44 @@ def test_effective_demo_mode_depends_on_selected_provider(tmp_path):
         devin_org_id="org-123",
         project_root=tmp_path,
     ).effective_demo_mode
+    assert Settings(
+        agent_provider="groq",
+        anthropic_api_key="sk-ant-test",
+        project_root=tmp_path,
+    ).effective_demo_mode
+
+
+def test_client_provider_credentials_are_scoped_to_a_new_agent(tmp_path):
+    base = ConjureAgent(Settings(agent_provider="devin", demo_mode=True, project_root=tmp_path))
+
+    anthropic = _agent_with_client_provider(
+        base,
+        {"provider": "anthropic", "api_key": " sk-ant-client "},
+    )
+    groq = _agent_with_client_provider(
+        base,
+        {"provider": "groq", "api_key": "gsk_client"},
+    )
+
+    assert anthropic is not base
+    assert anthropic.settings.agent_provider == "claude"
+    assert anthropic.settings.anthropic_api_key == "sk-ant-client"
+    assert not anthropic.settings.demo_mode
+    assert groq.settings.agent_provider == "groq"
+    assert groq.settings.groq_api_key == "gsk_client"
+    assert not groq.settings.demo_mode
+    assert base.settings.agent_provider == "devin"
+    assert base.settings.anthropic_api_key is None
+    assert base.settings.groq_api_key is None
+
+
+def test_client_provider_credentials_validate_without_echoing_keys(tmp_path):
+    base = ConjureAgent(Settings(project_root=tmp_path))
+    assert _agent_with_client_provider(base, {}) is base
+    with pytest.raises(ValueError, match="anthropic.*groq"):
+        _agent_with_client_provider(base, {"provider": "other", "api_key": "secret"})
+    with pytest.raises(ValueError, match="API key is required"):
+        _agent_with_client_provider(base, {"provider": "groq", "api_key": "  "})
 
 
 def test_load_settings_reads_agent_provider_toggle(monkeypatch):
@@ -61,6 +116,20 @@ def test_load_settings_reads_agent_provider_toggle(monkeypatch):
     assert settings.nvidia_api_key == "nvapi-test"
     assert settings.nvidia_model == "nvidia/nemotron-test"
     assert settings.nvidia_api_base_url == "http://localhost:8000/v1"
+    assert not settings.effective_demo_mode
+
+
+def test_load_settings_reads_groq_provider(monkeypatch):
+    monkeypatch.setenv("CONJURE_AGENT_PROVIDER", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+    monkeypatch.setenv("CONJURE_GROQ_MODEL", "qwen/qwen3-32b")
+    monkeypatch.setenv("CONJURE_DEMO_MODE", "false")
+
+    settings = load_settings()
+
+    assert settings.agent_provider == "groq"
+    assert settings.groq_api_key == "gsk_test"
+    assert settings.groq_model == "qwen/qwen3-32b"
     assert not settings.effective_demo_mode
 
 
@@ -292,6 +361,33 @@ def test_agent_uses_nemotron_tool_loop_when_provider_is_nemotron(tmp_path):
     assert events[0]["phrase"] == "Nemotron is working..."
     assert events[4]["provider"] == "nemotron"
     assert events[4]["phrase"] == "Nemotron finished."
+
+
+def test_agent_uses_groq_tool_loop_when_provider_is_groq(tmp_path):
+    agent = FakeLocalToolLoopAgent(
+        Settings(
+            agent_provider="groq",
+            groq_api_key="gsk_test",
+            project_root=tmp_path,
+        ),
+        store=InMemoryStore(),
+    )
+
+    events = list(
+        agent.stream_chat_response_sync(
+            query="Build a Chrome extension.",
+            project_id="project-123",
+            conversation_id="conversation-123",
+            active_tabs=[],
+            pending_tab_requests={},
+        )
+    )
+
+    assert agent.langchain_call["provider"] == "groq"
+    assert events[0]["provider"] == "groq"
+    assert events[0]["phrase"] == "Groq is working..."
+    assert events[4]["provider"] == "groq"
+    assert events[4]["phrase"] == "Groq finished."
 
 
 def test_agent_reuses_devin_session_for_followup(tmp_path):
