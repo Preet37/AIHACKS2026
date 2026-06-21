@@ -272,7 +272,7 @@ export default function App() {
     voiceInitiatedRef.current = true;
     void submitChatRef.current?.(text);
   }, []);
-  const { voiceState, voiceError, barAmplitudes, permissionState, requestPermission, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
+  const { voiceState, voiceError, barAmplitudes, permissionState, activateMic, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
 
   const addSystemMessage = useCallback((content: string) => {
     setMessages((current) => [
@@ -911,7 +911,7 @@ export default function App() {
         voiceError={voiceError}
         barAmplitudes={barAmplitudes}
         permissionState={permissionState}
-        onRequestPermission={requestPermission}
+        onActivateMic={activateMic}
       />
 
       {/* Project row and tabs strip hidden — config is internal */}
@@ -1136,10 +1136,10 @@ export default function App() {
         <div className="composer-actions">
           <button
             type="button"
-            title="Hold Alt/Option to speak · double-tap to lock"
+            title={voiceState === "locked" ? "Tap to send voice" : voiceState !== "idle" ? voiceState : "Click to start voice · or hold Alt/Option"}
             className={`mic-button icon-button${voiceState !== "idle" ? " mic-active" : ""}${voiceState === "locked" ? " mic-locked" : ""}`}
             aria-label="Voice input"
-            tabIndex={-1}
+            onClick={voiceState === "locked" ? activateMic : voiceState === "idle" ? activateMic : undefined}
           >
             {voiceState === "transcribing" ? (
               <Loader2 aria-hidden="true" className="spin" />

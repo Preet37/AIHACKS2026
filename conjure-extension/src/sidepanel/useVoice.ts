@@ -19,7 +19,8 @@ export interface UseVoiceReturn {
   voiceError: string | null;
   barAmplitudes: number[];
   permissionState: PermissionState | null;
-  requestPermission: () => Promise<void>;
+  /** Call from a button click to trigger getUserMedia with a guaranteed user gesture */
+  activateMic: () => Promise<void>;
   speakText: (text: string) => Promise<void>;
 }
 
@@ -131,9 +132,17 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[voice] openMic failed:", msg);
-      if (msg.includes("Permission denied") || msg.includes("NotAllowed") || msg.includes("NotFoundError")) {
-        setVoiceError("blocked");
-        setPermissionState("denied");
+      if (msg.includes("Permission denied") || msg.includes("NotAllowed")) {
+        // "dismissed" = user closed the prompt without choosing; treat as prompt so they can retry
+        if (msg.includes("dismissed")) {
+          setVoiceError("dismissed");
+          setPermissionState("prompt");
+        } else {
+          setVoiceError("blocked");
+          setPermissionState("denied");
+        }
+      } else if (msg.includes("NotFoundError") || msg.includes("Requested device not found")) {
+        setVoiceError("No microphone found.");
       } else {
         setVoiceError(msg);
       }
@@ -214,19 +223,18 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
     }
   }, [onTranscript, stopAmplitudeLoop, stopStream]);
 
-  // ── Request permission (from UI) ──────────────────────────────────────────
+  // ── Activate mic from button click (guaranteed user gesture) ─────────────
 
-  const requestPermission = useCallback(async () => {
+  const activateMic = useCallback(async () => {
+    if (voiceState !== "idle") return;
     setVoiceError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop());
-      setPermissionState("granted");
-    } catch {
-      setVoiceError("blocked");
-      setPermissionState("denied");
+    const ok = await openMic();
+    if (ok) {
+      isHoldingRef.current = true;
+      isLockedRef.current = true; // enter lock mode so user doesn't have to hold
+      setVoiceState("locked");
     }
-  }, []);
+  }, [voiceState, openMic]);
 
   // ── TTS ───────────────────────────────────────────────────────────────────
 
@@ -338,5 +346,5 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
     stopStream();
   }, [stopStream]);
 
-  return { voiceState, voiceError, barAmplitudes, permissionState, requestPermission, speakText };
+  return { voiceState, voiceError, barAmplitudes, permissionState, activateMic, speakText };
 }

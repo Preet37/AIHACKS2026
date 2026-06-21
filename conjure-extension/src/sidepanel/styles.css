@@ -804,6 +804,17 @@ h2 {
   border: 1px solid #f48fb1;
 }
 
+/* Dismissed — needs a click to retry */
+.voice-overlay--warn {
+  background: #fff8e1;
+  color: #e65100;
+  border: 1px solid #ffcc80;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 /* Error / permission denied */
 .voice-overlay--error {
   background: #fcecea;
@@ -900,6 +911,10 @@ h2 {
 
 .vo-fix-btn:hover {
   opacity: 0.85;
+}
+
+.vo-fix-btn--green {
+  background: #1b5e20;
 }
 
 /* ── Waveform bars ──────────────────────────────────────── */

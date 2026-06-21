@@ -7,7 +7,7 @@ interface Props {
   voiceError: string | null;
   barAmplitudes: number[];
   permissionState: PermissionState | null;
-  onRequestPermission: () => void;
+  onActivateMic: () => void;
 }
 
 function Waveform({ barAmplitudes, active }: { barAmplitudes: number[]; active: boolean }) {
@@ -15,7 +15,6 @@ function Waveform({ barAmplitudes, active }: { barAmplitudes: number[]; active: 
     <div className="waveform" aria-hidden="true">
       {Array.from({ length: VOICE_BAR_COUNT }, (_, i) => {
         const raw = active ? barAmplitudes[i] ?? 0 : 0;
-        // Minimum idle height so bars are always visible
         const minH = 0.06 + Math.sin((i / (VOICE_BAR_COUNT - 1)) * Math.PI) * 0.04;
         const h = Math.max(minH, raw);
         return (
@@ -35,19 +34,32 @@ export function VoiceOverlay({
   voiceError,
   barAmplitudes,
   permissionState,
-  onRequestPermission,
+  onActivateMic,
 }: Props) {
-  // Permission denied
+  // Hard blocked — user needs to go to Chrome settings
   if (permissionState === "denied" || voiceError === "blocked") {
     return (
       <div className="voice-overlay voice-overlay--error">
         <MicOff className="vo-icon" aria-hidden="true" />
         <div className="vo-text">
-          <strong>Microphone blocked</strong>
-          <span>Click the 🔒 in Chrome's address bar → Allow microphone</span>
+          <strong>Mic blocked in Chrome</strong>
+          <span>Go to chrome://settings/content/microphone and allow this extension</span>
         </div>
-        <button className="vo-fix-btn" onClick={onRequestPermission} type="button">
-          Retry
+      </div>
+    );
+  }
+
+  // Dismissed — Chrome showed the prompt but user didn't click Allow
+  if (voiceError === "dismissed") {
+    return (
+      <div className="voice-overlay voice-overlay--warn">
+        <Mic className="vo-icon" aria-hidden="true" />
+        <div className="vo-text">
+          <strong>Allow mic to use voice</strong>
+          <span>Click the button below — Chrome will ask for permission</span>
+        </div>
+        <button className="vo-fix-btn vo-fix-btn--green" onClick={onActivateMic} type="button">
+          Allow &amp; Start
         </button>
       </div>
     );
@@ -76,12 +88,12 @@ export function VoiceOverlay({
 
         <span className="vo-label">
           {voiceState === "listening" && "Listening"}
-          {voiceState === "locked" && "Locked · tap Alt to send"}
+          {voiceState === "locked" && "Recording · tap Alt or 🎙 to send"}
           {voiceState === "transcribing" && "Transcribing…"}
           {voiceState === "speaking" && "Speaking…"}
         </span>
 
-        {voiceState === "locked" && <span className="vo-badge">LOCK</span>}
+        {voiceState === "locked" && <span className="vo-badge">LIVE</span>}
       </div>
 
       {isRecording && (
@@ -89,7 +101,7 @@ export function VoiceOverlay({
       )}
 
       {voiceState === "listening" && (
-        <span className="vo-hint">Release Alt to send · double-tap Alt to lock</span>
+        <span className="vo-hint">Release Alt to send · double-tap Alt to keep recording</span>
       )}
     </div>
   );
