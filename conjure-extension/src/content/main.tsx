@@ -13,11 +13,8 @@ import {
 declare global {
   interface Window {
     __CONJURE_CONTENT_HOOKED__?: boolean;
-    __CONJURE_PAGE_HOOKED__?: boolean;
   }
 }
-
-const PAGE_HOOK_SOURCE = "conjure-page-hook";
 
 const initSentry = () => {
   if (!CONJURE_CONFIG.sentry.enabled) return;
@@ -40,6 +37,24 @@ initSentry();
 const captureException = (error: unknown) => {
   if (CONJURE_CONFIG.sentry.enabled) {
     Sentry.captureException(error);
+  }
+};
+
+const isRuntimeAvailable = () => {
+  try {
+    return typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
+  } catch {
+    return false;
+  }
+};
+
+const safeSendMessage = async (message: RuntimeRequest) => {
+  if (!isRuntimeAvailable()) return;
+  try {
+    await chrome.runtime.sendMessage(message);
+  } catch {
+    // Extension reloads invalidate the content-script context. Treat that as a
+    // lifecycle event, not an application error.
   }
 };
 
@@ -83,8 +98,7 @@ const sendConsoleEvent = (
   const serialized = args.map(serializeValue);
   const text = serialized.join(" ");
 
-  chrome.runtime
-    .sendMessage({
+  void safeSendMessage({
       type: CONTENT_MESSAGE.CONSOLE_EVENT,
       payload: {
         level,
@@ -94,8 +108,7 @@ const sendConsoleEvent = (
         timestamp: Date.now(),
         source
       }
-    })
-    .catch(() => undefined);
+    });
 };
 
 const installIsolatedWorldHooks = () => {
@@ -126,65 +139,6 @@ const installIsolatedWorldHooks = () => {
     },
     true
   );
-};
-
-const installPageWorldHooks = () => {
-  const script = document.createElement("script");
-  script.textContent = `(() => {
-    if (window.__CONJURE_PAGE_HOOKED__) return;
-    window.__CONJURE_PAGE_HOOKED__ = true;
-    const source = "${PAGE_HOOK_SOURCE}";
-    const serialize = (value) => {
-      if (value instanceof Error) return [value.name + ": " + value.message, value.stack || ""].filter(Boolean).join("\\n");
-      if (typeof value === "string") return value;
-      if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return String(value);
-      try {
-        const seen = new WeakSet();
-        return JSON.stringify(value, (_key, nested) => {
-          if (nested && typeof nested === "object") {
-            if (seen.has(nested)) return "[Circular]";
-            seen.add(nested);
-          }
-          return nested;
-        });
-      } catch {
-        return Object.prototype.toString.call(value);
-      }
-    };
-    const emit = (level, args, hookSource) => {
-      window.postMessage({
-        source,
-        payload: {
-          level,
-          args: Array.from(args).map(serialize).map((item) => String(item).slice(0, 4000)),
-          text: Array.from(args).map(serialize).join(" ").slice(0, 12000),
-          url: location.href,
-          timestamp: Date.now(),
-          source: hookSource
-        }
-      }, "*");
-    };
-    for (const level of ["debug", "info", "log", "warn", "error"]) {
-      const original = console[level];
-      console[level] = function(...args) {
-        emit(level, args, "console");
-        return original.apply(this, args);
-      };
-    }
-    window.addEventListener("error", (event) => {
-      emit("error", [event.message, event.filename, event.lineno, event.error], "window");
-    }, true);
-    window.addEventListener("unhandledrejection", (event) => {
-      emit("error", [event.reason], "unhandledrejection");
-    }, true);
-  })();`;
-
-  try {
-    (document.documentElement || document.head || document.body)?.appendChild(script);
-    script.remove();
-  } catch (error) {
-    captureException(error);
-  }
 };
 
 const sanitizeElement = (element: Element): Element => {
@@ -253,41 +207,27 @@ const getElementHtml = (message: GetElementHtmlMessage): RuntimeResult<PageConte
   };
 };
 
-window.addEventListener("message", (event) => {
-  if (event.source !== window || event.data?.source !== PAGE_HOOK_SOURCE) return;
-  chrome.runtime
-    .sendMessage({
-      type: CONTENT_MESSAGE.CONSOLE_EVENT,
-      payload: event.data.payload
-    })
-    .catch(() => undefined);
-});
-
 installIsolatedWorldHooks();
 
-if (document.documentElement) {
-  installPageWorldHooks();
-} else {
-  document.addEventListener("DOMContentLoaded", installPageWorldHooks, { once: true });
+if (isRuntimeAvailable()) {
+  chrome.runtime.onMessage.addListener((message: RuntimeRequest, _sender, sendResponse) => {
+    try {
+      if (message.type === CONTENT_MESSAGE.GET_PAGE_CONTENT) {
+        sendResponse(getPageContent(message));
+        return true;
+      }
+
+      if (message.type === CONTENT_MESSAGE.GET_ELEMENT_HTML) {
+        sendResponse(getElementHtml(message));
+        return true;
+      }
+
+      sendResponse({ ok: false, error: "Unsupported content message." });
+    } catch (error) {
+      captureException(error);
+      sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+
+    return true;
+  });
 }
-
-chrome.runtime.onMessage.addListener((message: RuntimeRequest, _sender, sendResponse) => {
-  try {
-    if (message.type === CONTENT_MESSAGE.GET_PAGE_CONTENT) {
-      sendResponse(getPageContent(message));
-      return true;
-    }
-
-    if (message.type === CONTENT_MESSAGE.GET_ELEMENT_HTML) {
-      sendResponse(getElementHtml(message));
-      return true;
-    }
-
-    sendResponse({ ok: false, error: "Unsupported content message." });
-  } catch (error) {
-    captureException(error);
-    sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
-  }
-
-  return true;
-});

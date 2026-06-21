@@ -1,11 +1,33 @@
 /*
  * Conjure design tokens — the contract (CONJURE-DESIGN.md §2).
  * Single source of truth. Nothing else in the codebase hardcodes a hex,
- * a radius, or a font stack. JetBrains Mono is self-hosted via
- * @fontsource/jetbrains-mono (imported in main.tsx). No pixel face is
- * bundled: --cj-font-pixel falls back to mono, and the splash identity is
- * carried by the hand-built CSS pixel mark.
+ * a radius, or a font stack. Fonts are bundled under public/fonts so MV3
+ * pages and content overlays can resolve them from the extension package.
  */
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Departure Mono";
+  src: url("/fonts/DepartureMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
 
 :root {
   /* grounds */

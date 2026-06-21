@@ -15,12 +15,14 @@ import {
   type ActiveTabSnapshot,
   type ApplyModsResult,
   type ClientToServerEvent,
+  type ConsoleLevel,
   type ConsoleLogEntry,
   type GeneratedBundle,
   type GetElementHtmlMessage,
   type GetPageContentMessage,
   type ModRecord,
   type PageContentResult,
+  type RuntimeRequest,
   type RuntimeResult,
   type ServerToClientEvent
 } from "../shared/messages";
@@ -116,7 +118,24 @@ const captureException = (error: unknown) => {
   }
 };
 
-const getChromeApi = () => (typeof chrome === "undefined" ? undefined : chrome);
+const getChromeApi = () => {
+  try {
+    if (typeof chrome === "undefined" || !chrome.runtime?.id) return undefined;
+    return chrome;
+  } catch {
+    return undefined;
+  }
+};
+
+const safeRuntimeMessage = async <T,>(message: RuntimeRequest): Promise<RuntimeResult<T> | undefined> => {
+  const chromeApi = getChromeApi();
+  if (!chromeApi?.runtime?.sendMessage) return undefined;
+  try {
+    return (await chromeApi.runtime.sendMessage(message)) as RuntimeResult<T>;
+  } catch {
+    return undefined;
+  }
+};
 
 const previewTabSnapshot = (): ActiveTabSnapshot[] => [
   {
@@ -148,6 +167,17 @@ const readNumber = (record: Record<string, unknown>, ...keys: string[]) => {
     if (typeof value === "string" && value.trim()) return Number(value);
   }
   return undefined;
+};
+
+const readConsoleLevel = (record: Record<string, unknown>): ConsoleLevel | undefined => {
+  const level = readString(record, "level");
+  return level === "debug" ||
+    level === "info" ||
+    level === "log" ||
+    level === "warn" ||
+    level === "error"
+    ? level
+    : undefined;
 };
 
 const fallbackPageScript = (includeHtml: boolean, maxChars: number): PageContentResult => {
@@ -303,7 +333,7 @@ export default function App() {
       }
       setStatusText("Applying mods to browser");
       try {
-        const response = await chromeApi.runtime.sendMessage({
+        const response = await safeRuntimeMessage<ApplyModsResult>({
           type: BACKGROUND_MESSAGE.APPLY_MODS,
           bundles
         });
@@ -359,10 +389,7 @@ export default function App() {
         }
         const data = (await response.json()) as { mods?: ModRecord[] };
         setMods(data.mods || []);
-        const chromeApi = getChromeApi();
-        if (chromeApi?.runtime?.sendMessage) {
-          await chromeApi.runtime.sendMessage({ type: BACKGROUND_MESSAGE.REMOVE_MOD, modId: mod.id });
-        }
+        await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.REMOVE_MOD, modId: mod.id });
         setStatusText(`Removed "${mod.name}"`);
         addSystemMessage(`Removed mod "${mod.name}".`);
       } catch (error) {
@@ -429,7 +456,7 @@ export default function App() {
       return previewTabs;
     }
 
-    const response = await chromeApi.runtime.sendMessage({
+    const response = await safeRuntimeMessage<ActiveTabSnapshot[]>({
       type: BACKGROUND_MESSAGE.GET_ACTIVE_TABS
     });
 
@@ -472,23 +499,23 @@ export default function App() {
 
       try {
         if (selector) {
-          const response = await chromeApi.tabs.sendMessage(tabId, {
+          const response = (await chromeApi.tabs.sendMessage(tabId, {
             type: CONTENT_MESSAGE.GET_ELEMENT_HTML,
             requestId,
             selector,
             maxChars: CONJURE_CONFIG.pageContentMaxChars
-          } satisfies GetElementHtmlMessage);
+          } satisfies GetElementHtmlMessage)) as RuntimeResult<PageContentResult>;
 
           if (isRuntimeOk<PageContentResult>(response)) return response.data;
           throw new Error(response?.error || "Content script could not read the selected element.");
         }
 
-        const response = await chromeApi.tabs.sendMessage(tabId, {
+        const response = (await chromeApi.tabs.sendMessage(tabId, {
           type: CONTENT_MESSAGE.GET_PAGE_CONTENT,
           requestId,
           includeHtml,
           maxChars: CONJURE_CONFIG.pageContentMaxChars
-        } satisfies GetPageContentMessage);
+        } satisfies GetPageContentMessage)) as RuntimeResult<PageContentResult>;
 
         if (isRuntimeOk<PageContentResult>(response)) return response.data;
         throw new Error(response?.error || "Content script could not read the page.");
@@ -548,10 +575,10 @@ export default function App() {
           return;
         }
 
-        const response = await chromeApi.runtime.sendMessage({
+        const response = await safeRuntimeMessage<ConsoleLogEntry[]>({
           type: BACKGROUND_MESSAGE.GET_CONSOLE_LOGS,
           tabId,
-          level: readString(event, "level"),
+          level: readConsoleLevel(event),
           since: readNumber(event, "since"),
           limit: 300
         });
@@ -958,12 +985,7 @@ export default function App() {
 
   useEffect(() => {
     void getActiveTabs();
-    const chromeApi = getChromeApi();
-    if (chromeApi?.runtime?.sendMessage) {
-      chromeApi.runtime
-        .sendMessage({ type: BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE })
-        .catch(captureException);
-    }
+    void safeRuntimeMessage({ type: BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE });
   }, [getActiveTabs]);
 
   // Load the mod list and (re)apply every active mod whenever the project changes.

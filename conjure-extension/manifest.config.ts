@@ -16,11 +16,20 @@ export default defineManifest((env) => ({
     service_worker: "src/background.ts",
     type: "module"
   },
+  content_security_policy: {
+    extension_pages: "script-src 'self'; object-src 'self'"
+  },
   content_scripts: [
     {
       matches: ["http://*/*", "https://*/*"],
       js: ["src/content/main.tsx"],
       run_at: "document_start"
+    }
+  ],
+  web_accessible_resources: [
+    {
+      resources: ["fonts/*"],
+      matches: ["<all_urls>"]
     }
   ],
   permissions: ["sidePanel", "storage", "tabs", "scripting", "userScripts"],
