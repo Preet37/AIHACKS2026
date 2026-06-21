@@ -18,6 +18,112 @@ declare global {
 }
 
 const PAGE_HOOK_SOURCE = "conjure-page-hook";
+const AGENT_ACTION_ATTRIBUTE = "data-conjure-agent-action";
+type AgentFeedbackState = "running" | "success" | "error";
+
+interface AgentFeedback {
+  host: HTMLElement;
+  card: HTMLElement;
+  title: HTMLElement;
+  body: HTMLElement;
+}
+
+const agentFeedbackByHost = new WeakMap<HTMLElement, AgentFeedback>();
+
+const getAgentFeedback = (): AgentFeedback => {
+  let host = document.querySelector<HTMLElement>("[data-conjure-runtime-agent-feedback]");
+  const existing = host ? agentFeedbackByHost.get(host) : undefined;
+  if (existing) return existing;
+
+  host = document.createElement("conjure-agent-feedback");
+  host.dataset.conjureRuntimeAgentFeedback = "true";
+  const importantStyles: Record<string, string> = {
+    position: "fixed",
+    right: "16px",
+    bottom: "76px",
+    zIndex: "2147483647",
+    width: "min(380px, calc(100vw - 32px))",
+    maxWidth: "calc(100vw - 32px)",
+    display: "block",
+    pointerEvents: "none"
+  };
+  Object.entries(importantStyles).forEach(([property, value]) => {
+    host!.style.setProperty(property.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`), value, "important");
+  });
+
+  const shadow = host.attachShadow({ mode: "closed" });
+  shadow.innerHTML = `
+    <style>
+      :host { all: initial; }
+      .card {
+        box-sizing: border-box;
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 12px;
+        width: 100%;
+        max-height: 52vh;
+        overflow: auto;
+        padding: 14px;
+        border: 1px solid #d8e2dc;
+        border-radius: 14px;
+        color: #18201c;
+        background: #fff;
+        box-shadow: 0 14px 40px rgba(20,43,35,.22);
+        font: 13px/1.5 system-ui, -apple-system, sans-serif;
+        animation: feedback-in .18s ease-out both;
+      }
+      .icon {
+        box-sizing: border-box;
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        border-radius: 999px;
+        font: 700 18px/1 system-ui, sans-serif;
+      }
+      .card[data-state="running"] .icon {
+        border: 3px solid #d7e3ff;
+        border-right-color: #2563eb;
+        animation: spin .8s linear infinite;
+      }
+      .card[data-state="success"] { border-color: #9bd7ae; animation: feedback-done .36s ease-out both; }
+      .card[data-state="success"] .icon { color: #fff; background: #168a45; }
+      .card[data-state="error"] { border-color: #efaaa6; animation: feedback-error .28s ease-out both; }
+      .card[data-state="error"] .icon { color: #fff; background: #c9362b; }
+      .glyph { display: none; }
+      .card[data-state="success"] .glyph,
+      .card[data-state="error"] .glyph { display: block; }
+      .title { margin: 0 0 3px; color: #111814; font-weight: 750; font-size: 14px; }
+      .body { margin: 0; color: #435149; white-space: pre-wrap; overflow-wrap: anywhere; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes feedback-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+      @keyframes feedback-done { 0% { transform: scale(.98); } 55% { transform: scale(1.025); } 100% { transform: scale(1); } }
+      @keyframes feedback-error { 0%,100% { transform: translateX(0); } 35% { transform: translateX(-4px); } 70% { transform: translateX(4px); } }
+      @media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; } }
+    </style>
+    <section class="card" data-state="running" role="status" aria-live="polite" aria-atomic="true">
+      <div class="icon" aria-hidden="true"><span class="glyph"></span></div>
+      <div><p class="title"></p><p class="body"></p></div>
+    </section>
+  `;
+  const card = shadow.querySelector<HTMLElement>(".card")!;
+  const title = shadow.querySelector<HTMLElement>(".title")!;
+  const body = shadow.querySelector<HTMLElement>(".body")!;
+  (document.body || document.documentElement).append(host);
+  const feedback = { host, card, title, body };
+  agentFeedbackByHost.set(host, feedback);
+  return feedback;
+};
+
+const showAgentFeedback = (state: AgentFeedbackState, message: string): void => {
+  const feedback = getAgentFeedback();
+  feedback.host.style.setProperty("display", "block", "important");
+  feedback.card.dataset.state = state;
+  feedback.title.textContent = state === "running" ? "Working…" : state === "success" ? "Done" : "Couldn’t finish";
+  feedback.body.textContent = message;
+  const glyph = feedback.card.querySelector<HTMLElement>(".glyph");
+  if (glyph) glyph.textContent = state === "success" ? "✓" : state === "error" ? "!" : "";
+};
 
 const initSentry = () => {
   if (!CONJURE_CONFIG.sentry.enabled) return;
@@ -262,6 +368,53 @@ window.addEventListener("message", (event) => {
     })
     .catch(() => undefined);
 });
+
+// The content bridge exists on every web page, so use it to make mod syncing
+// independent of whether the user ever opens the Conjure side panel.
+chrome.runtime.sendMessage({ type: CONTENT_MESSAGE.SYNC_MODS }).catch(() => undefined);
+
+document.addEventListener(
+  "click",
+  (event) => {
+    if (!event.isTrusted || !(event.target instanceof Element)) return;
+    const control = event.target.closest<HTMLElement>(`[${AGENT_ACTION_ATTRIBUTE}]`);
+    if (
+      !control ||
+      !["explain-page", "send-hello-email"].includes(control.dataset.conjureAgentAction || "")
+    ) return;
+
+    // Own this trusted click so generated code cannot substitute a canned answer.
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    control.setAttribute("aria-busy", "true");
+    if (control instanceof HTMLButtonElement) control.disabled = true;
+
+    const action = control.dataset.conjureAgentAction as "explain-page" | "send-hello-email";
+    showAgentFeedback("running", action === "send-hello-email" ? "Sending email…" : "Running agent…");
+
+    chrome.runtime
+      .sendMessage({
+        type: CONTENT_MESSAGE.AGENT_ACTION,
+        action,
+        url: location.href
+      })
+      .then((response: RuntimeResult<{ result: string }>) => {
+        if (response?.ok) {
+          showAgentFeedback("success", response.data.result);
+        } else {
+          showAgentFeedback("error", response?.error || "Agent request failed.");
+        }
+      })
+      .catch((error) => {
+        showAgentFeedback("error", error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        control.removeAttribute("aria-busy");
+        if (control instanceof HTMLButtonElement) control.disabled = false;
+      });
+  },
+  true
+);
 
 installIsolatedWorldHooks();
 

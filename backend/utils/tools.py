@@ -580,6 +580,18 @@ async def verify_mod(mod_id: str | None = None, target_url: str | None = None) -
     if bundle is None:
         return _json({"error": "Mod has no usable manifest/content scripts to verify yet."})
 
+    visible_ui_findings = _visible_ui_findings(bundle, str(record.get("prompt") or ""))
+    if visible_ui_findings:
+        return _json(
+            {
+                "mod_id": mod_id,
+                "passed": False,
+                "source": "content_script_ui_preflight",
+                "findings": visible_ui_findings,
+                "instruction": "Fix the content-script files, then call verify_mod again.",
+            }
+        )
+
     target_urls = (
         [target_url]
         if target_url
@@ -667,6 +679,53 @@ async def verify_mod(mod_id: str | None = None, target_url: str | None = None) -
             "results": results,
         }
     )
+
+
+def _visible_ui_findings(bundle: Mapping[str, Any], prompt: str) -> list[str]:
+    """Catch popup-only or invisible button mods before an expensive sandbox run."""
+    if not re.search(r"\b(button|floating control|toolbar|widget)\b", prompt, re.I):
+        return []
+    js = str(bundle.get("js") or "")
+    css = str(bundle.get("css") or "")
+    combined = f"{js}\n{css}"
+    findings: list[str] = []
+    if not re.search(r"createElement\s*\(\s*['\"]button['\"]|<button\b", js, re.I):
+        findings.append(
+            "No real button is created by the installed content script. popup.html/action UI is not installed for mods."
+        )
+    if not re.search(r"appendChild|\.append\s*\(|\.prepend\s*\(|insertAdjacentHTML", js):
+        findings.append("The content script does not mount its UI into the webpage DOM.")
+    if not re.search(r"data-conjure-mod|dataset\.conjureMod", js):
+        findings.append("The mounted UI needs a data-conjure-mod marker so visibility can be verified.")
+    if not re.search(r"position\s*[:=]\s*['\"]?fixed", combined, re.I):
+        findings.append("The page control is not fixed, so it may be outside the visible viewport.")
+    if not re.search(r"z-?index|zIndex", combined, re.I):
+        findings.append("The page control needs a high z-index so the host page cannot cover it.")
+    if re.search(r"\bagent\b|\bexplain", prompt, re.I) and not re.search(
+        r"data-conjure-agent-action|dataset\.conjureAgentAction", js
+    ):
+        findings.append(
+            "Agent buttons must set data-conjure-agent-action=\"explain-page\" so Conjure calls the real configured agent; do not hardcode the answer."
+        )
+    if re.search(r"data-conjure-agent-action|dataset\.conjureAgentAction", js) and re.search(
+        r"data-conjure-agent-output|dataset\.conjureAgentOutput", js
+    ):
+        findings.append(
+            "Do not create an agent output panel. Conjure renders the real Browserbase response in its own trusted, visible panel."
+        )
+    if re.search(r"data-conjure-agent-action|dataset\.conjureAgentAction", js) and re.search(
+        r"addEventListener\s*\(\s*['\"]click['\"]|\.onclick\s*=", js, re.I
+    ):
+        findings.append(
+            "Agent controls must not install their own click handler or static completion popup. Conjure owns the trusted running/success/error feedback."
+        )
+    if re.search(r"\b(?:send|email|gmail)\b", prompt, re.I) and not re.search(
+        r"send-hello-email", js
+    ):
+        findings.append(
+            "The Gmail demo button must set data-conjure-agent-action=\"send-hello-email\" so the trusted Browserbase action performs the send."
+        )
+    return findings
 
 
 async def validate_extension() -> str:

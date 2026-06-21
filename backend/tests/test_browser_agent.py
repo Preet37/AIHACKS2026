@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -445,6 +446,86 @@ def test_drive_session_clicks_named_result_instead_of_returning_search_url():
     assert items[0]["url"] == "https://www.amazon.com/dp/B00HNQUR4O"
     assert [event[0] for event in events] == ["navigate", "extract", "act", "extract", "navigate"]
     assert "Columbia Watertight II Jacket" in events[2][1]
+
+
+def test_gmail_send_uses_observed_structured_stagehand_action():
+    events = []
+
+    class Action:
+        method = "click"
+        description = "Blue Send button"
+
+        def to_dict(self, **kwargs):
+            assert kwargs == {"exclude_none": True}
+            return {
+                "method": "click",
+                "description": self.description,
+                "selector": "xpath=//div[@role='button' and text()='Send']",
+                "arguments": [],
+            }
+
+    class Session:
+        async def observe(self, **kwargs):
+            assert kwargs["page"].ready
+            events.append(("observe", kwargs["page"], kwargs["options"]["timeout"]))
+            return SimpleNamespace(
+                success=True,
+                data=SimpleNamespace(result=[Action()]),
+            )
+
+        async def act(self, **kwargs):
+            events.append(("act", kwargs["page"], kwargs["input"]["method"]))
+            return SimpleNamespace(
+                success=True,
+                data=SimpleNamespace(result=SimpleNamespace(success=True, message="clicked")),
+            )
+
+    class Toast:
+        @property
+        def first(self):
+            return self
+
+        async def wait_for(self, **kwargs):
+            events.append(("confirmation", kwargs["timeout"]))
+
+    class Page:
+        ready = False
+
+        async def wait_for_load_state(self, state, **kwargs):
+            assert state == "load"
+            self.ready = True
+            events.append(("load", kwargs["timeout"]))
+
+        def locator(self, selector):
+            assert 'data-tooltip^="Send"' in selector
+            return ReadyLocator()
+
+        def get_by_text(self, pattern):
+            return Toast()
+
+        async def wait_for_timeout(self, timeout):
+            events.append(("settle", timeout))
+
+    class ReadyLocator:
+        @property
+        def first(self):
+            return self
+
+        async def wait_for(self, **kwargs):
+            events.append(("send-ready", kwargs["timeout"]))
+
+    page = Page()
+    run(browser_agent._wait_for_gmail_composer(page))
+    run(browser_agent._click_gmail_send(Session(), page))
+
+    assert events == [
+        ("load", browser_agent.GMAIL_LOAD_TIMEOUT_MS),
+        ("send-ready", browser_agent.GMAIL_SEND_READY_TIMEOUT_MS),
+        ("settle", 300),
+        ("observe", page, browser_agent.GMAIL_OBSERVE_TIMEOUT_MS),
+        ("act", page, "click"),
+        ("confirmation", browser_agent.GMAIL_CONFIRM_TIMEOUT_MS),
+    ]
 
 
 def test_dom_fast_path_ranks_matching_detail_links_and_honors_price_limit():

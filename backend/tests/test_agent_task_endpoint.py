@@ -96,3 +96,77 @@ def test_agent_task_maps_browser_error_to_502(monkeypatch):
     response = client.post("/projects/demo/agent-task", json={"task": "jackets", "url": "https://x"})
     assert response.status_code == 502
     assert "Off-device browse failed" in response.json()["detail"]
+
+
+def test_mod_agent_routes_explanation_through_browserbase(monkeypatch):
+    captured = {}
+
+    async def fake_explain(**kwargs):
+        captured.update(kwargs)
+        return {
+            "result": "This page explains the example domain.",
+            "session_id": "bb_explain",
+            "replay_url": "https://bb/sessions/bb_explain",
+        }
+
+    _use_settings(monkeypatch)
+    _allow(monkeypatch)
+    monkeypatch.setattr("backend.main.browser_agent.explain_page_remote", fake_explain)
+
+    response = TestClient(app).post(
+        "/projects/demo/mod-agent",
+        json={
+            "action": "explain-page",
+            "url": "https://example.com",
+            "cookies": [{"name": "sid", "value": "x", "domain": ".example.com"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"] == "This page explains the example domain."
+    assert response.json()["session_id"] == "bb_explain"
+    assert captured["start_url"] == "https://example.com"
+    assert captured["cookies"][0]["name"] == "sid"
+    assert isinstance(captured["settings"], BrowserAgentSettings)
+
+
+def test_mod_agent_routes_fixed_gmail_send_through_browserbase(monkeypatch):
+    captured = {}
+
+    async def fake_send(**kwargs):
+        captured.update(kwargs)
+        return {
+            "result": "Email sent to tkennedy4432@gmail.com.",
+            "session_id": "bb_gmail",
+            "replay_url": "https://bb/sessions/bb_gmail",
+        }
+
+    _use_settings(monkeypatch)
+    _allow(monkeypatch)
+    monkeypatch.setattr("backend.main.browser_agent.send_gmail_message_remote", fake_send)
+
+    response = TestClient(app).post(
+        "/projects/demo/mod-agent",
+        json={
+            "action": "send-hello-email",
+            "url": "https://mail.google.com/mail/u/0/#inbox",
+            "cookies": [{"name": "SID", "value": "x", "domain": ".google.com"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"] == "Email sent to tkennedy4432@gmail.com."
+    assert captured["recipient"] == "tkennedy4432@gmail.com"
+    assert captured["subject"] == "Hello World"
+    assert captured["body"] == "Hello world"
+    assert captured["start_url"].startswith("https://mail.google.com/")
+
+
+def test_mod_agent_rejects_non_browserbase_action(monkeypatch):
+    _use_settings(monkeypatch)
+    _allow(monkeypatch)
+    response = TestClient(app).post(
+        "/projects/demo/mod-agent",
+        json={"action": "arbitrary-prompt", "url": "https://example.com"},
+    )
+    assert response.status_code == 400

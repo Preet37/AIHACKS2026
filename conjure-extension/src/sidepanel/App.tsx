@@ -60,7 +60,7 @@ const SESSION_STORAGE_KEY = "conjure.session";
 const USE_CASES = [
   {
     label: "Agent button",
-    prompt: "Build a button that asks an agent to explain the current page."
+    prompt: "Add an agent button that sends a Hello World email."
   },
   {
     label: "Cross-site mod",
@@ -261,6 +261,7 @@ export default function App() {
   const [tools, setTools] = useState<ToolRun[]>([]);
   const [rules, setRules] = useState<string[]>([]);
   const [statusText, setStatusText] = useState("Ready");
+  const [activityPhase, setActivityPhase] = useState<"thinking" | "validating">("thinking");
   const [findings, setFindings] = useState<AgentFinding[]>([]);
   const [findingStatus, setFindingStatus] = useState<"idle" | "running" | "done" | "error">("idle");
   const [findingError, setFindingError] = useState<string | null>(null);
@@ -488,6 +489,7 @@ export default function App() {
       const task = taskInput.trim();
       if (!task) return;
       setFindingStatus("running");
+      setActivityPhase("thinking");
       setFindingError(null);
       setFindings([]);
       setStatusText("Spinning up a cloud browser to search...");
@@ -603,6 +605,11 @@ export default function App() {
           appendAssistantContent(event.content);
           return;
         case SERVER_EVENT.TOOL_START:
+          setActivityPhase(
+            ["verify_mod", "validate_extension", "run_in_sandbox"].includes(event.name)
+              ? "validating"
+              : "thinking"
+          );
           setTools((current) => [
             {
               id: `${event.name}-${Date.now()}`,
@@ -652,8 +659,15 @@ export default function App() {
         case SERVER_EVENT.REQUEST_CONSOLE_LOGS:
           void handleRequestConsoleLogs(raw);
           return;
+        case SERVER_EVENT.SANDBOX_START:
+        case SERVER_EVENT.SANDBOX_SCREENSHOT:
+        case SERVER_EVENT.SANDBOX_RESULT:
+        case SERVER_EVENT.SANDBOX_HEALING:
+          setActivityPhase("validating");
+          return;
         case SERVER_EVENT.EXTENSION_READY: {
           const bundles = (event as { bundles?: GeneratedBundle[] }).bundles || [];
+          setActivityPhase("validating");
           setStatusText("Applying mods");
           void applyModBundles(bundles);
           return;
@@ -769,6 +783,7 @@ export default function App() {
         return;
       }
       currentAssistantIdRef.current = null;
+      setActivityPhase("thinking");
       setAgentRun({
         active: true,
         phrase: "Starting agent...",
@@ -962,12 +977,12 @@ export default function App() {
           </div>
           <div>
             <h1>conjure</h1>
-            <p>{busy ? "Thinking" : statusText}</p>
+            <p>{busy ? (activityPhase === "validating" ? "Validating…" : "Thinking…") : statusText}</p>
           </div>
         </div>
         <div className={`connection ${busy ? "thinking" : connectionState}`}>
           {statusIcon}
-          <span>{busy ? "Thinking" : connectionState}</span>
+          <span>{busy ? (activityPhase === "validating" ? "Validating" : "Thinking") : connectionState}</span>
         </div>
       </header>
 

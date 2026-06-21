@@ -222,6 +222,7 @@ def active_bundles(project_dir: Path) -> list[dict[str, Any]]:
             continue
         bundle = mod_bundle(project_dir, str(mod.get("id")))
         if bundle is not None:
+            bundle["scope_mode"] = mod.get("scope_mode", "generated")
             bundles.append(bundle)
     return bundles
 

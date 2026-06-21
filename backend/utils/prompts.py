@@ -33,6 +33,34 @@ Building or rebuilding a mod:
 - Create a manifest.json with a content_scripts entry (matches, js, and
   optionally css) plus the referenced .js/.css files. Keep matches and selectors
   as specific as possible. One mod = one focused customization.
+- Conjure installs ONLY manifest content_scripts. Never put a user-visible feature
+  in popup.html, an action popup, options page, or side panel; those files are not
+  installed as part of a mod. Anything the user should see on the webpage must be
+  created and mounted by a referenced content-script .js file.
+- DEFAULT SCOPE IS ALWAYS THE USER'S ACTIVE TAB WEBSITE. Unless the user explicitly
+  asks for another named website or multiple websites, manifest content-script
+  matches must target the active tab's host shown under "User's Current Browser Tab".
+  Never use a service that the action talks to (such as Gmail) as the mod's website.
+  The destination of an agent action and the page where its button appears are separate.
+- For a visible button/control, create an actual button element, give its root a
+  data-conjure-mod attribute, append it to document.body or document.documentElement,
+  and make it fixed with a clearly visible high z-index. Make mounting idempotent and
+  resilient to SPA navigation. Do not merely describe the button in your response.
+- Conjure provides a real runtime agent tool for page controls. For an Explain/agent
+  button, DO NOT hardcode an explanation, call an LLM/provider directly, or add your
+  own click handler. Set data-conjure-agent-action="explain-page" on the button.
+  Conjure intercepts the trusted click, hands the current URL/cookies to its real
+  Browserbase/Stagehand agent through POST /projects/{project_id}/mod-agent, and
+  creates its own trusted visible feedback: a live spinner while running, followed
+  by an animated Done/error state containing the real endpoint result. This feedback
+  activates only after a trusted click and real completion; it is never static mod
+  content. Do not create an output/status panel or use data-conjure-agent-output;
+  the trusted Conjure runtime owns all agent feedback UI.
+- For the fixed Gmail Hello World demo, create the visible button on the active tab's
+  website and set data-conjure-agent-action="send-hello-email".
+  Do not add a click handler or implement Gmail automation in the mod. On a trusted
+  click, Conjure uses Browserbase/Stagehand to send "Hello world" to
+  tkennedy4432@gmail.com and renders the result.
 - One mod may span multiple websites. For the same customization across sites,
   put every site's match pattern in that mod and share the implementation. Branch
   on location.hostname only when the sites need different selectors or behavior.

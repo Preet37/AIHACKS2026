@@ -1,5 +1,7 @@
 export const CONTENT_MESSAGE = {
   CONSOLE_EVENT: "conjure:console_event",
+  SYNC_MODS: "conjure:sync_mods",
+  AGENT_ACTION: "conjure:agent_action",
   GET_PAGE_CONTENT: "conjure:get_page_content",
   GET_ELEMENT_HTML: "conjure:get_element_html"
 } as const;
@@ -91,6 +93,10 @@ export interface ContentConsoleEventMessage {
   };
 }
 
+export interface SyncModsMessage {
+  type: typeof CONTENT_MESSAGE.SYNC_MODS;
+}
+
 export interface GetPageContentMessage {
   type: typeof CONTENT_MESSAGE.GET_PAGE_CONTENT;
   requestId?: string;
@@ -103,6 +109,12 @@ export interface GetElementHtmlMessage {
   requestId?: string;
   selector: string;
   maxChars?: number;
+}
+
+export interface ModAgentActionMessage {
+  type: typeof CONTENT_MESSAGE.AGENT_ACTION;
+  action: "explain-page" | "send-hello-email";
+  url: string;
 }
 
 export interface GetCurrentTabMessage {
@@ -126,6 +138,7 @@ export interface GeneratedBundle {
   mod_id?: string;
   name: string;
   matches: string[];
+  scope_mode?: "current_tab" | "generated";
   run_at: string;
   js: string;
   css: string;
@@ -196,6 +209,8 @@ export interface AgentTaskResponse {
 
 export type RuntimeRequest =
   | ContentConsoleEventMessage
+  | SyncModsMessage
+  | ModAgentActionMessage
   | GetPageContentMessage
   | GetElementHtmlMessage
   | GetCurrentTabMessage

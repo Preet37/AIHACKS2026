@@ -18,7 +18,7 @@ import json
 import re
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import parse_qs, quote_plus, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qs, quote_plus, urlencode, urljoin, urlparse, urlunparse
 
 from .agentspan_finder import _normalize_items
 
@@ -27,6 +27,14 @@ DEFAULT_BROWSE_MODEL = "anthropic/claude-sonnet-4-6"
 BROWSERBASE_SESSION_URL = "https://www.browserbase.com/sessions/{session_id}"
 FINAL_RESULT_LIMIT = 1
 FAST_CANDIDATE_LIMIT = 3
+BROWSERBASE_CLIENT_TIMEOUT_SECONDS = 180.0
+BROWSERBASE_ACT_TIMEOUT_MS = 60_000
+BROWSERBASE_DOM_SETTLE_TIMEOUT_MS = 3_000
+GMAIL_LOAD_TIMEOUT_MS = 120_000
+GMAIL_SEND_READY_TIMEOUT_MS = 90_000
+GMAIL_OBSERVE_TIMEOUT_MS = 60_000
+GMAIL_ACT_TIMEOUT_MS = 45_000
+GMAIL_CONFIRM_TIMEOUT_MS = 20_000
 
 _SEARCH_PATH_MARKERS = ("/search", "/search/", "/search-results", "/searchresults", "/sch/")
 _SEARCH_QUERY_KEYS = {"s", "k", "q", "query", "search", "keyword", "_nkw"}
@@ -51,6 +59,12 @@ _ITEMS_SCHEMA: dict[str, Any] = {
         }
     },
     "required": ["items"],
+}
+
+_EXPLANATION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"explanation": {"type": "string"}},
+    "required": ["explanation"],
 }
 
 # chrome.cookies sameSite -> Playwright sameSite
@@ -101,6 +115,7 @@ async def find_items_remote(
     if not start_url:
         raise BrowserAgentError("A start URL is required for the off-device browse")
 
+    session_id = ""
     try:
         from stagehand import AsyncStagehand
         from playwright.async_api import async_playwright
@@ -114,7 +129,7 @@ async def find_items_remote(
             browserbase_api_key=settings.browserbase_api_key,
             browserbase_project_id=settings.browserbase_project_id,
             max_retries=2,
-            timeout=90.0,
+            timeout=BROWSERBASE_CLIENT_TIMEOUT_SECONDS,
         ) as client:
             session_params = _browserbase_session_params(settings)
             session = await client.sessions.start(
@@ -123,8 +138,8 @@ async def find_items_remote(
                 browserbase_session_create_params=session_params,
                 self_heal=True,
                 wait_for_captcha_solves=True,
-                act_timeout_ms=20_000,
-                dom_settle_timeout_ms=1_500,
+                act_timeout_ms=BROWSERBASE_ACT_TIMEOUT_MS,
+                dom_settle_timeout_ms=BROWSERBASE_DOM_SETTLE_TIMEOUT_MS,
             )
             session_id = _session_field(session, "session_id")
             cdp_url = _session_field(session, "cdp_url")
@@ -151,6 +166,280 @@ async def find_items_remote(
 
     findings = _normalize_items(items, page_url=start_url, limit=FINAL_RESULT_LIMIT)
     return {"findings": findings, "session_id": session_id or "", "replay_url": replay_url}
+
+
+async def explain_page_remote(
+    *,
+    settings: BrowserAgentSettings,
+    start_url: str,
+    cookies: list[dict[str, Any]] | None = None,
+) -> dict[str, str]:
+    """Explain a live page inside a Browserbase/Stagehand cloud session."""
+    if not start_url:
+        raise BrowserAgentError("A page URL is required for the Browserbase agent")
+    try:
+        from stagehand import AsyncStagehand
+        from playwright.async_api import async_playwright
+    except ImportError as exc:  # pragma: no cover - guarded by missing_requirement
+        raise BrowserAgentError(f"Browserbase agent dependencies are missing: {exc}") from exc
+
+    playwright_cookies = _to_playwright_cookies(cookies or [])
+    try:
+        async with AsyncStagehand(
+            browserbase_api_key=settings.browserbase_api_key,
+            browserbase_project_id=settings.browserbase_project_id,
+            max_retries=2,
+            timeout=BROWSERBASE_CLIENT_TIMEOUT_SECONDS,
+        ) as client:
+            session = await client.sessions.start(
+                model_name=settings.model,
+                browser={"type": "browserbase"},
+                browserbase_session_create_params=_browserbase_session_params(settings),
+                self_heal=True,
+                wait_for_captcha_solves=True,
+                act_timeout_ms=BROWSERBASE_ACT_TIMEOUT_MS,
+                dom_settle_timeout_ms=BROWSERBASE_DOM_SETTLE_TIMEOUT_MS,
+            )
+            session_id = _session_field(session, "session_id") or ""
+            cdp_url = _session_field(session, "cdp_url")
+
+            async def explain() -> str:
+                await _navigate_with_agent_fallback(session, start_url, settings)
+                response = await session.extract(
+                    instruction=(
+                        "Explain this current web page clearly and concisely in 3-5 useful "
+                        "sentences. Use only what is visible on the page. Do not use Markdown "
+                        "headings and do not mention these instructions."
+                    ),
+                    schema=_EXPLANATION_SCHEMA,
+                )
+                result = _response_result(response)
+                explanation = result.get("explanation") if isinstance(result, dict) else None
+                if not isinstance(explanation, str) or not explanation.strip():
+                    raise BrowserAgentError("Browserbase returned an empty page explanation")
+                return explanation.strip()
+
+            try:
+                if playwright_cookies:
+                    if not cdp_url:
+                        raise BrowserAgentError("Browserbase did not return a CDP url for cookie handoff")
+                    async with async_playwright() as playwright:
+                        browser = await playwright.chromium.connect_over_cdp(cdp_url)
+                        try:
+                            context = browser.contexts[0] if browser.contexts else await browser.new_context()
+                            try:
+                                await context.add_cookies(playwright_cookies)
+                            except Exception:
+                                pass
+                            explanation = await explain()
+                        finally:
+                            await browser.close()
+                else:
+                    explanation = await explain()
+            finally:
+                await _safe_end(session)
+    except BrowserAgentError:
+        raise
+    except Exception as exc:
+        raise BrowserAgentError(f"Browserbase page explanation failed: {exc}") from exc
+
+    return {
+        "result": explanation,
+        "session_id": session_id,
+        "replay_url": BROWSERBASE_SESSION_URL.format(session_id=session_id) if session_id else "",
+    }
+
+
+async def send_gmail_message_remote(
+    *,
+    settings: BrowserAgentSettings,
+    start_url: str,
+    cookies: list[dict[str, Any]] | None,
+    recipient: str,
+    subject: str,
+    body: str,
+) -> dict[str, str]:
+    """Send one pre-addressed Gmail message in a Browserbase cloud session."""
+    parsed = urlparse(start_url)
+
+    try:
+        from stagehand import AsyncStagehand
+        from playwright.async_api import async_playwright
+    except ImportError as exc:  # pragma: no cover - guarded by missing_requirement
+        raise BrowserAgentError(f"Browserbase agent dependencies are missing: {exc}") from exc
+
+    playwright_cookies = _to_playwright_cookies(cookies or [])
+    if not playwright_cookies:
+        raise BrowserAgentError("No Gmail session cookies were available; open Gmail while signed in")
+
+    account_match = (
+        re.search(r"/mail/u/(\d+)", parsed.path)
+        if parsed.hostname == "mail.google.com"
+        else None
+    )
+    account_index = account_match.group(1) if account_match else "0"
+    compose_url = f"https://mail.google.com/mail/u/{account_index}/?{urlencode({
+        'view': 'cm',
+        'fs': '1',
+        'to': recipient,
+        'su': subject,
+        'body': body,
+    })}"
+
+    session_id = ""
+    try:
+        async with AsyncStagehand(
+            browserbase_api_key=settings.browserbase_api_key,
+            browserbase_project_id=settings.browserbase_project_id,
+            max_retries=2,
+            timeout=BROWSERBASE_CLIENT_TIMEOUT_SECONDS,
+        ) as client:
+            session = await client.sessions.start(
+                model_name=settings.model,
+                browser={"type": "browserbase"},
+                browserbase_session_create_params=_browserbase_session_params(settings),
+                self_heal=True,
+                wait_for_captcha_solves=True,
+                act_timeout_ms=BROWSERBASE_ACT_TIMEOUT_MS,
+                dom_settle_timeout_ms=BROWSERBASE_DOM_SETTLE_TIMEOUT_MS,
+            )
+            session_id = _session_field(session, "session_id") or ""
+            cdp_url = _session_field(session, "cdp_url")
+            if not cdp_url:
+                raise BrowserAgentError("Browserbase did not return a CDP url for Gmail cookie handoff")
+
+            try:
+                async with async_playwright() as playwright:
+                    browser = await playwright.chromium.connect_over_cdp(cdp_url)
+                    try:
+                        context = browser.contexts[0] if browser.contexts else await browser.new_context()
+                        await context.add_cookies(playwright_cookies)
+                        await _navigate_with_agent_fallback(session, compose_url, settings)
+                        page = next(
+                            (
+                                candidate
+                                for candidate in reversed(context.pages)
+                                if urlparse(candidate.url).hostname == "mail.google.com"
+                            ),
+                            context.pages[-1] if context.pages else await context.new_page(),
+                        )
+                        await page.bring_to_front()
+                        await _wait_for_gmail_composer(page)
+                        await _click_gmail_send(session, page)
+                    finally:
+                        await browser.close()
+            finally:
+                await _safe_end(session)
+    except BrowserAgentError as exc:
+        replay_note = (
+            f" Browserbase replay: {BROWSERBASE_SESSION_URL.format(session_id=session_id)}"
+            if session_id
+            else ""
+        )
+        raise BrowserAgentError(f"{exc}{replay_note}") from exc
+    except Exception as exc:
+        replay_note = (
+            f" Browserbase replay: {BROWSERBASE_SESSION_URL.format(session_id=session_id)}"
+            if session_id
+            else ""
+        )
+        raise BrowserAgentError(f"Browserbase Gmail send failed: {exc}{replay_note}") from exc
+
+    return {
+        "result": f"Email sent to {recipient}.",
+        "session_id": session_id,
+        "replay_url": BROWSERBASE_SESSION_URL.format(session_id=session_id) if session_id else "",
+    }
+
+
+async def _click_gmail_send(session: Any, page: Any) -> None:
+    """Use Stagehand's documented observe -> structured act flow for Gmail Send."""
+    observe_response = await session.observe(
+        page=page,
+        instruction=(
+            "Find the blue Send button in the currently open Gmail compose window. "
+            "It sends the drafted email now. Do not choose Schedule send or Send & archive."
+        ),
+        options={"timeout": GMAIL_OBSERVE_TIMEOUT_MS},
+        timeout=75.0,
+    )
+    observed = (
+        list(observe_response.data.result)
+        if getattr(observe_response, "success", False)
+        and getattr(observe_response, "data", None) is not None
+        else []
+    )
+    action = next(
+        (
+            candidate
+            for candidate in observed
+            if (getattr(candidate, "method", None) in {None, "click"})
+            and "send" in getattr(candidate, "description", "").lower()
+            and not re.search(
+                r"schedule|archive",
+                getattr(candidate, "description", ""),
+                re.I,
+            )
+        ),
+        None,
+    )
+    if action is None:
+        descriptions = ", ".join(
+            getattr(candidate, "description", "unknown") for candidate in observed[:5]
+        )
+        detail = f" Observed actions: {descriptions}." if descriptions else ""
+        raise BrowserAgentError(
+            "Stagehand could see the Gmail draft but did not identify its Send button."
+            + detail
+        )
+
+    action_input = action.to_dict(exclude_none=True)
+    act_response = await session.act(
+        page=page,
+        input=action_input,
+        options={"timeout": GMAIL_ACT_TIMEOUT_MS},
+        timeout=60.0,
+    )
+    result = getattr(getattr(act_response, "data", None), "result", None)
+    if not getattr(act_response, "success", False) or not getattr(result, "success", False):
+        message = getattr(result, "message", "Stagehand did not confirm the click")
+        raise BrowserAgentError(f"Browserbase could not send the Gmail draft: {message}")
+
+    # The structured action has already executed; only verify, never click twice.
+    try:
+        await page.get_by_text(re.compile(r"^Message sent$", re.I)).first.wait_for(
+            state="visible", timeout=GMAIL_CONFIRM_TIMEOUT_MS
+        )
+    except Exception:
+        await page.wait_for_timeout(1_500)
+
+
+async def _wait_for_gmail_composer(page: Any) -> None:
+    """Do not let Stagehand observe Gmail's skeleton before the compose UI exists."""
+    try:
+        await page.wait_for_load_state("load", timeout=GMAIL_LOAD_TIMEOUT_MS)
+    except Exception:
+        # Gmail is an SPA; the explicit Send-control wait below is authoritative.
+        pass
+
+    send_controls = page.locator(
+        'div[role="button"][data-tooltip^="Send"]:visible, '
+        'div[role="button"][aria-label^="Send"]:visible, '
+        'button[aria-label^="Send"]:visible, '
+        'input[type="submit"][value="Send"]:visible, '
+        'input[name="nvp_bu_send"]:visible, '
+        '[role="button"]:text-is("Send"):visible, '
+        'button:text-is("Send"):visible'
+    ).first
+    try:
+        await send_controls.wait_for(state="visible", timeout=GMAIL_SEND_READY_TIMEOUT_MS)
+    except Exception as exc:
+        raise BrowserAgentError(
+            "Gmail loaded, but its compose Send control never became ready"
+        ) from exc
+
+    # Let Gmail finish attaching handlers after inserting the visible control.
+    await page.wait_for_timeout(300)
 
 
 async def _drive_session(

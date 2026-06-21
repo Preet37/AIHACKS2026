@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
+import re
 import uuid
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +22,11 @@ from .utils.config import load_settings
 from .utils.memory import extract_and_save_rules
 from .utils.store import create_store
 from .utils.tools import project_dir_for
+
+
+GMAIL_HELLO_RECIPIENT = "tkennedy4432@gmail.com"
+GMAIL_HELLO_SUBJECT = "Hello World"
+GMAIL_HELLO_BODY = "Hello world"
 
 
 app = FastAPI(title="conjure backend")
@@ -47,6 +55,63 @@ class AgentTaskRequest(BaseModel):
     task: str
     url: str = ""
     cookies: list[dict[str, Any]] = []
+
+
+class ModAgentRequest(BaseModel):
+    """Trusted extension request triggered by an agent-enabled page control."""
+
+    action: str
+    url: str = ""
+    cookies: list[dict[str, Any]] = []
+
+
+@app.post("/projects/{project_id}/mod-agent")
+async def run_mod_agent(project_id: str, payload: ModAgentRequest) -> dict[str, str]:
+    if payload.action not in {"explain-page", "send-hello-email"}:
+        raise HTTPException(status_code=400, detail="Unsupported mod agent action")
+    if not payload.url.strip():
+        raise HTTPException(status_code=400, detail="Page URL is required")
+
+    settings = load_settings()
+    browse_settings = BrowserAgentSettings(
+        browserbase_api_key=settings.browserbase_api_key,
+        browserbase_project_id=settings.browserbase_project_id,
+        model=settings.browse_model,
+        max_results=settings.browse_max_results,
+        max_steps=settings.browse_max_steps,
+        region=settings.browserbase_session_region,
+        use_proxies=settings.browse_use_proxies,
+        verified=settings.browse_verified,
+        advanced_stealth=settings.browse_advanced_stealth,
+    )
+    blocker = browser_agent.missing_requirement(browse_settings)
+    if blocker:
+        raise HTTPException(status_code=503, detail=blocker)
+    try:
+        if payload.action == "send-hello-email":
+            result = await browser_agent.send_gmail_message_remote(
+                settings=browse_settings,
+                start_url=payload.url,
+                cookies=payload.cookies,
+                recipient=GMAIL_HELLO_RECIPIENT,
+                subject=GMAIL_HELLO_SUBJECT,
+                body=GMAIL_HELLO_BODY,
+            )
+        else:
+            result = await browser_agent.explain_page_remote(
+                settings=browse_settings,
+                start_url=payload.url,
+                cookies=payload.cookies,
+            )
+    except BrowserAgentError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        "project_id": project_id,
+        "action": payload.action,
+        "result": result["result"],
+        "session_id": result.get("session_id", ""),
+        "replay_url": result.get("replay_url", ""),
+    }
 
 
 @app.post("/projects/{project_id}/agent-task")
@@ -288,7 +353,13 @@ async def _handle_chat_message(
         return
 
     if provisional_mod_id:
-        _finish_provisional_mod(project_dir, provisional_mod_id, keep=True)
+        _finish_provisional_mod(
+            project_dir,
+            provisional_mod_id,
+            keep=True,
+            current_tab_url=_active_tab_url(active_tabs),
+            preserve_generated_scope=_query_explicitly_targets_websites(query),
+        )
 
     content = "".join(content_parts)
     await _persist_turn(store, conversation_id, query, content)
@@ -352,12 +423,76 @@ def _mod_name_from_query(query: str) -> str:
     return (name[:57].rstrip() + "...") if len(name) > 60 else (name or "Untitled mod")
 
 
-def _finish_provisional_mod(project_dir: Path, mod_id: str, *, keep: bool) -> None:
+def _finish_provisional_mod(
+    project_dir: Path,
+    mod_id: str,
+    *,
+    keep: bool,
+    current_tab_url: str | None = None,
+    preserve_generated_scope: bool = False,
+) -> None:
     """Promote a built provisional mod, or remove its empty/failed record."""
     if keep and mods_registry.mod_bundle(project_dir, mod_id) is not None:
-        mods_registry.upsert_mod(project_dir, {"id": mod_id, "status": "active"})
+        scope_changed = False
+        if current_tab_url and not preserve_generated_scope:
+            scope_changed = _scope_mod_manifest_to_url(project_dir, mod_id, current_tab_url)
+        update: dict[str, Any] = {
+            "id": mod_id,
+            "status": "active",
+            "scope_mode": "generated" if preserve_generated_scope else "current_tab",
+        }
+        if scope_changed:
+            update["last_verified"] = None
+        mods_registry.upsert_mod(project_dir, update)
         return
     mods_registry.delete_mod(project_dir, mod_id)
+
+
+def _active_tab_url(active_tabs: list[dict[str, Any]]) -> str | None:
+    candidates = [*filter(lambda tab: tab.get("active"), active_tabs), *active_tabs]
+    for tab in candidates:
+        url = tab.get("url")
+        if isinstance(url, str) and urlparse(url).scheme in {"http", "https"}:
+            return url
+    return None
+
+
+def _query_explicitly_targets_websites(query: str) -> bool:
+    """Keep model-generated scope only when the user clearly requested it."""
+    without_emails = re.sub(r"\b[^\s@]+@[^\s@]+\b", "", query.lower())
+    if re.search(r"https?://|\b(?:www\.)?[a-z0-9-]+\.(?:com|org|net|io|app|dev)\b", without_emails):
+        return True
+    return bool(
+        re.search(
+            r"\b(?:across|both|multiple|several|all|every)\s+(?:the\s+)?(?:web)?sites?\b|"
+            r"\bon\s+(?:the\s+)?(?:reddit|youtube|amazon|facebook|instagram|twitter|github|gmail)\b",
+            without_emails,
+        )
+    )
+
+
+def _scope_mod_manifest_to_url(project_dir: Path, mod_id: str, tab_url: str) -> bool:
+    """Force a default-scope mod onto the active tab's host."""
+    parsed = urlparse(tab_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    manifest_path = mods_registry.mod_dir(project_dir, mod_id) / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    scripts = manifest.get("content_scripts")
+    if not isinstance(scripts, list):
+        return False
+    pattern = f"{parsed.scheme}://{parsed.hostname}/*"
+    changed = False
+    for script in scripts:
+        if isinstance(script, dict) and script.get("matches") != [pattern]:
+            script["matches"] = [pattern]
+            changed = True
+    if changed:
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return changed
 
 
 async def _update_memory(

@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/browser";
-import { CONJURE_CONFIG } from "./shared/config";
+import { CONJURE_CONFIG, createModAgentUrl, createModsBundleUrl } from "./shared/config";
+import { appendDiagnosticLog } from "./shared/diagnosticLogs";
 import {
   BACKGROUND_MESSAGE,
   CONTENT_MESSAGE,
@@ -11,14 +12,19 @@ import {
   type ContentConsoleEventMessage,
   type GeneratedBundle,
   type GetConsoleLogsMessage,
+  type ModAgentActionMessage,
   type RemoveModMessage,
   type RuntimeRequest,
   type RuntimeResult
 } from "./shared/messages";
 
 const RELOADED_CURRENT_TABS_KEY = "conjure.currentTabsReloadedForContentHooks";
+const MOD_FINGERPRINTS_KEY = "conjure.modFingerprints";
 const MOD_SCRIPT_PREFIX = "conjure-mod-";
 const consoleLogsByTab = new Map<number, ConsoleLogEntry[]>();
+const modAgentRequestsByTab = new Map<number, Promise<RuntimeResult<{ result: string }>>>();
+const SUPPORTED_MOD_AGENT_ACTIONS = new Set(["explain-page", "send-hello-email"]);
+let modSyncRequest: Promise<RuntimeResult<ApplyModsResult>> | null = null;
 
 // chrome.userScripts is only present when the user has enabled developer mode
 // (or the per-extension "Allow user scripts" toggle). Access it defensively so
@@ -35,7 +41,29 @@ const getUserScriptsApi = (): UserScriptsApi | undefined =>
 
 const modScriptId = (modId: string) => `${MOD_SCRIPT_PREFIX}${modId}`;
 
+const bundleFingerprint = (bundle: GeneratedBundle): string => {
+  const input = JSON.stringify([bundle.matches, bundle.run_at, bundle.js, bundle.css]);
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+};
+
 const VALID_RUN_AT = new Set(["document_start", "document_end", "document_idle"]);
+
+const currentTabMatchPattern = async (): Promise<string | null> => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  try {
+    const url = new URL(tab?.url || "");
+    return ["http:", "https:"].includes(url.protocol)
+      ? `${url.protocol}//${url.hostname}/*`
+      : null;
+  } catch {
+    return null;
+  }
+};
 
 const userScriptsUnavailableError =
   "Conjure can't auto-apply yet. Open chrome://extensions, find Conjure, and turn on " +
@@ -109,11 +137,20 @@ const unregisterStaleMods = async (
 };
 
 /** Register/refresh one mod as a persistent user script. */
-const registerMod = async (userScripts: UserScriptsApi, bundle: GeneratedBundle): Promise<boolean> => {
+const registerMod = async (
+  userScripts: UserScriptsApi,
+  bundle: GeneratedBundle,
+  fingerprints: Record<string, string>
+): Promise<boolean> => {
   if (!bundle.mod_id || !bundle.matches?.length) return false;
   const scriptId = modScriptId(bundle.mod_id);
   const runAt = VALID_RUN_AT.has(bundle.run_at) ? bundle.run_at : "document_idle";
   const existing = await userScripts.getScripts({ ids: [scriptId] });
+  const fingerprint = bundleFingerprint(bundle);
+  const sameMatches =
+    existing.length > 0 &&
+    JSON.stringify(existing[0].matches || []) === JSON.stringify(bundle.matches);
+  if (sameMatches && fingerprints[scriptId] === fingerprint) return false;
   if (existing.length > 0) {
     await userScripts.unregister({ ids: [scriptId] });
   }
@@ -126,6 +163,7 @@ const registerMod = async (userScripts: UserScriptsApi, bundle: GeneratedBundle)
       world: "USER_SCRIPT"
     }
   ]);
+  fingerprints[scriptId] = fingerprint;
   return true;
 };
 
@@ -139,14 +177,26 @@ const applyMods = async (message: ApplyModsMessage): Promise<RuntimeResult<Apply
     return { ok: false, error: userScriptsUnavailableError };
   }
 
-  const bundles = (message.bundles || []).filter((bundle) => bundle.mod_id);
+  const currentMatch = await currentTabMatchPattern();
+  const bundles = (message.bundles || [])
+    .filter((bundle) => bundle.mod_id)
+    .map((bundle) =>
+      bundle.scope_mode === "current_tab" && currentMatch
+        ? { ...bundle, matches: [currentMatch] }
+        : bundle
+    );
   const keepIds = new Set(bundles.map((bundle) => modScriptId(bundle.mod_id as string)));
+  const stored = await chrome.storage.local.get(MOD_FINGERPRINTS_KEY);
+  const fingerprints =
+    stored[MOD_FINGERPRINTS_KEY] && typeof stored[MOD_FINGERPRINTS_KEY] === "object"
+      ? { ...(stored[MOD_FINGERPRINTS_KEY] as Record<string, string>) }
+      : {};
 
   let applied = 0;
   const matchesToReload = new Set<string>();
   try {
     for (const bundle of bundles) {
-      if (await registerMod(userScripts, bundle)) {
+      if (await registerMod(userScripts, bundle, fingerprints)) {
         applied += 1;
         bundle.matches.forEach((pattern) => matchesToReload.add(pattern));
       }
@@ -156,8 +206,37 @@ const applyMods = async (message: ApplyModsMessage): Promise<RuntimeResult<Apply
   }
 
   const removed = await unregisterStaleMods(userScripts, keepIds);
+  Object.keys(fingerprints).forEach((id) => {
+    if (!keepIds.has(id)) delete fingerprints[id];
+  });
+  await chrome.storage.local.set({ [MOD_FINGERPRINTS_KEY]: fingerprints });
   const reloaded = await reloadCurrentMatchingTab([...matchesToReload]);
   return { ok: true, data: { applied, removed, reloaded } };
+};
+
+const syncModsFromBackend = (): Promise<RuntimeResult<ApplyModsResult>> => {
+  if (modSyncRequest) return modSyncRequest;
+  modSyncRequest = (async () => {
+    try {
+      const response = await fetch(createModsBundleUrl(CONJURE_CONFIG.projectId), {
+        cache: "no-store"
+      });
+      if (!response.ok) {
+        throw new Error(`Mod bundle endpoint returned ${response.status}.`);
+      }
+      const body = (await response.json()) as { bundles?: GeneratedBundle[] };
+      return await applyMods({
+        type: BACKGROUND_MESSAGE.APPLY_MODS,
+        bundles: body.bundles || []
+      });
+    } catch (error) {
+      appendDiagnosticLog("Mod sync", error).catch(captureException);
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    } finally {
+      modSyncRequest = null;
+    }
+  })();
+  return modSyncRequest;
 };
 
 /** Remove a single mod's user script (the backend deletes its files separately). */
@@ -308,6 +387,49 @@ const reloadCurrentTabOnce = async (): Promise<RuntimeResult<{ reloaded: boolean
   return { ok: true, data: { reloaded: true, count: 1 } };
 };
 
+const runModAgentAction = async (
+  message: ModAgentActionMessage,
+  sender: chrome.runtime.MessageSender
+): Promise<RuntimeResult<{ result: string }>> => {
+  const tabId = sender.tab?.id;
+  if (typeof tabId !== "number" || !SUPPORTED_MOD_AGENT_ACTIONS.has(message.action)) {
+    return { ok: false, error: "Agent actions must come from a supported page control." };
+  }
+  const pending = modAgentRequestsByTab.get(tabId);
+  if (pending) return pending;
+
+  const request = (async (): Promise<RuntimeResult<{ result: string }>> => {
+    try {
+      const cookies = await chrome.cookies.getAll({
+        url: message.action === "send-hello-email" ? "https://mail.google.com/" : message.url
+      });
+      const response = await fetch(createModAgentUrl(CONJURE_CONFIG.projectId), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: message.action,
+          url: message.url.slice(0, 2000),
+          cookies
+        })
+      });
+      const body = (await response.json()) as { result?: string; detail?: string };
+      if (!response.ok || !body.result) {
+        throw new Error(body.detail || `Agent endpoint returned ${response.status}.`);
+      }
+      return { ok: true, data: { result: body.result } };
+    } catch (error) {
+      appendDiagnosticLog("Mod agent", error).catch(captureException);
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  })();
+  modAgentRequestsByTab.set(tabId, request);
+  try {
+    return await request;
+  } finally {
+    modAgentRequestsByTab.delete(tabId);
+  }
+};
+
 const handleRuntimeMessage = async (
   message: RuntimeRequest,
   sender: chrome.runtime.MessageSender
@@ -315,6 +437,10 @@ const handleRuntimeMessage = async (
   switch (message.type) {
     case CONTENT_MESSAGE.CONSOLE_EVENT:
       return appendConsoleLog(message, sender);
+    case CONTENT_MESSAGE.SYNC_MODS:
+      return syncModsFromBackend();
+    case CONTENT_MESSAGE.AGENT_ACTION:
+      return runModAgentAction(message, sender);
     case BACKGROUND_MESSAGE.GET_CONSOLE_LOGS:
       return getConsoleLogs(message);
     case BACKGROUND_MESSAGE.GET_CURRENT_TAB:
@@ -334,12 +460,14 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel
     .setPanelBehavior({ openPanelOnActionClick: true })
     .catch(captureException);
+  void syncModsFromBackend();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   chrome.sidePanel
     .setPanelBehavior({ openPanelOnActionClick: true })
     .catch(captureException);
+  void syncModsFromBackend();
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -356,3 +484,6 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest, sender, sendRespo
 
   return true;
 });
+
+// Extension reloads start a fresh worker even when onInstalled/onStartup do not fire.
+void syncModsFromBackend();

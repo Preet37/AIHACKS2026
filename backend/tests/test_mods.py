@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.main import _finish_provisional_mod
+from backend.main import _finish_provisional_mod, _query_explicitly_targets_websites
 from backend.utils import mods, tools
 from backend.utils.config import Settings
 from backend.utils.sandbox import SandboxResult
@@ -41,6 +41,76 @@ def _write_multi_site_mod(project_dir: Path, mod_id: str = "shared-mod") -> Path
         encoding="utf-8",
     )
     return directory
+
+
+def test_visible_button_preflight_rejects_popup_only_bundle() -> None:
+    findings = tools._visible_ui_findings(
+        {"js": "console.log('popup handles the button')", "css": ""},
+        "Build an agent explainer button",
+    )
+
+    assert any("No real button" in finding for finding in findings)
+    assert any("webpage DOM" in finding for finding in findings)
+
+
+def test_visible_button_preflight_accepts_mounted_fixed_content_script_button() -> None:
+    findings = tools._visible_ui_findings(
+        {
+            "js": """
+                const button = document.createElement('button');
+                button.dataset.conjureMod = 'agent-explainer';
+                button.dataset.conjureAgentAction = 'explain-page';
+                button.style.position = 'fixed';
+                button.style.zIndex = '2147483647';
+                document.documentElement.append(button);
+            """,
+            "css": "",
+        },
+        "Build an agent explainer button",
+    )
+
+    assert findings == []
+
+
+def test_visible_button_preflight_rejects_mod_owned_agent_output() -> None:
+    findings = tools._visible_ui_findings(
+        {
+            "js": """
+                const button = document.createElement('button');
+                button.dataset.conjureMod = 'agent-explainer';
+                button.dataset.conjureAgentAction = 'explain-page';
+                button.style.position = 'fixed';
+                button.style.zIndex = '2147483647';
+                const output = document.createElement('div');
+                output.dataset.conjureAgentOutput = 'true';
+                document.documentElement.append(button, output);
+            """,
+            "css": "",
+        },
+        "Build an agent explainer button",
+    )
+
+    assert any("Do not create an agent output panel" in finding for finding in findings)
+
+
+def test_visible_button_preflight_rejects_fake_agent_completion_handler() -> None:
+    findings = tools._visible_ui_findings(
+        {
+            "js": """
+                const button = document.createElement('button');
+                button.dataset.conjureMod = 'fake-agent';
+                button.dataset.conjureAgentAction = 'explain-page';
+                button.style.position = 'fixed';
+                button.style.zIndex = '2147483647';
+                button.addEventListener('click', () => alert('Done'));
+                document.documentElement.append(button);
+            """,
+            "css": "",
+        },
+        "Build an agent button",
+    )
+
+    assert any("must not install their own click handler" in finding for finding in findings)
 
 
 def test_target_urls_include_each_distinct_website() -> None:
@@ -142,6 +212,50 @@ def test_provisional_mod_is_promoted_only_when_it_has_a_bundle(tmp_path: Path) -
     mods.upsert_mod(project_dir, {"id": "complete", "status": "building"})
     _finish_provisional_mod(project_dir, "complete", keep=True)
     assert mods.get_mod(project_dir, "complete")["status"] == "active"
+
+
+def test_new_mod_defaults_to_current_tab_website(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    _write_multi_site_mod(project_dir, "current-page")
+    mods.upsert_mod(project_dir, {"id": "current-page", "status": "building"})
+
+    _finish_provisional_mod(
+        project_dir,
+        "current-page",
+        keep=True,
+        current_tab_url="https://shop.example.com/products/1",
+    )
+
+    assert mods.mod_bundle(project_dir, "current-page")["matches"] == [
+        "https://shop.example.com/*"
+    ]
+    assert mods.get_mod(project_dir, "current-page")["last_verified"] is None
+
+
+def test_explicit_multi_site_request_preserves_generated_scope(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    _write_multi_site_mod(project_dir, "shared")
+
+    _finish_provisional_mod(
+        project_dir,
+        "shared",
+        keep=True,
+        current_tab_url="https://shop.example.com/",
+        preserve_generated_scope=True,
+    )
+
+    assert mods.mod_bundle(project_dir, "shared")["matches"] == [
+        "*://www.youtube.com/*",
+        "https://www.reddit.com/*",
+    ]
+
+
+def test_email_recipient_does_not_count_as_explicit_website_scope() -> None:
+    assert not _query_explicitly_targets_websites(
+        "Add a button that emails hello to tkennedy4432@gmail.com"
+    )
+    assert _query_explicitly_targets_websites("Add it across both websites")
+    assert _query_explicitly_targets_websites("Add it on reddit")
 
 
 def test_verify_mod_checks_every_matched_website(tmp_path: Path) -> None:

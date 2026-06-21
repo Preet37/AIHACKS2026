@@ -343,13 +343,17 @@ class ConjureAgent:
     def _build_langchain_model(self, provider: str, tools: Sequence[Any]) -> Any:
         if provider == "claude":
             try:
-                from langchain.chat_models import init_chat_model
+                from langchain_anthropic import ChatAnthropic
             except ImportError as exc:
                 raise RuntimeError(
                     "Claude provider requires langchain and langchain-anthropic."
                 ) from exc
 
-            return init_chat_model(self.settings.anthropic_model).bind_tools(tools)
+            model = ChatAnthropic(
+                model=self.settings.anthropic_model,
+                api_key=self.settings.anthropic_api_key,
+            )
+            return model.bind_tools(tools) if tools else model
 
         if provider == "nemotron":
             try:
@@ -364,7 +368,8 @@ class ConjureAgent:
                 kwargs["nvidia_api_key"] = self.settings.nvidia_api_key
             if self.settings.nvidia_api_base_url:
                 kwargs["base_url"] = self.settings.nvidia_api_base_url
-            return ChatNVIDIA(**kwargs).bind_tools(tools)
+            model = ChatNVIDIA(**kwargs)
+            return model.bind_tools(tools) if tools else model
 
         if provider == "groq":
             try:
@@ -374,10 +379,11 @@ class ConjureAgent:
                     "Groq provider requires langchain-groq."
                 ) from exc
 
-            return ChatGroq(
+            model = ChatGroq(
                 model=self.settings.groq_model,
                 api_key=self.settings.groq_api_key,
-            ).bind_tools(tools)
+            )
+            return model.bind_tools(tools) if tools else model
 
         raise RuntimeError(f"Unsupported local tool-loop provider: {provider}")
 
