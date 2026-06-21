@@ -10,7 +10,9 @@ export const BACKGROUND_MESSAGE = {
   GET_CONSOLE_LOGS: "conjure:get_console_logs",
   RELOAD_ALL_TABS_ONCE: "conjure:reload_all_tabs_once",
   APPLY_MODS: "conjure:apply_mods",
-  REMOVE_MOD: "conjure:remove_mod"
+  REMOVE_MOD: "conjure:remove_mod",
+  VOICE_START: "conjure:voice_start",
+  VOICE_STOP: "conjure:voice_stop"
 } as const;
 
 export const CLIENT_EVENT = {

@@ -13,11 +13,8 @@ import {
 declare global {
   interface Window {
     __CONJURE_CONTENT_HOOKED__?: boolean;
-    __CONJURE_PAGE_HOOKED__?: boolean;
   }
 }
-
-const PAGE_HOOK_SOURCE = "conjure-page-hook";
 
 const initSentry = () => {
   if (!CONJURE_CONFIG.sentry.enabled) return;
@@ -128,64 +125,10 @@ const installIsolatedWorldHooks = () => {
   );
 };
 
-const installPageWorldHooks = () => {
-  const script = document.createElement("script");
-  script.textContent = `(() => {
-    if (window.__CONJURE_PAGE_HOOKED__) return;
-    window.__CONJURE_PAGE_HOOKED__ = true;
-    const source = "${PAGE_HOOK_SOURCE}";
-    const serialize = (value) => {
-      if (value instanceof Error) return [value.name + ": " + value.message, value.stack || ""].filter(Boolean).join("\\n");
-      if (typeof value === "string") return value;
-      if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return String(value);
-      try {
-        const seen = new WeakSet();
-        return JSON.stringify(value, (_key, nested) => {
-          if (nested && typeof nested === "object") {
-            if (seen.has(nested)) return "[Circular]";
-            seen.add(nested);
-          }
-          return nested;
-        });
-      } catch {
-        return Object.prototype.toString.call(value);
-      }
-    };
-    const emit = (level, args, hookSource) => {
-      window.postMessage({
-        source,
-        payload: {
-          level,
-          args: Array.from(args).map(serialize).map((item) => String(item).slice(0, 4000)),
-          text: Array.from(args).map(serialize).join(" ").slice(0, 12000),
-          url: location.href,
-          timestamp: Date.now(),
-          source: hookSource
-        }
-      }, "*");
-    };
-    for (const level of ["debug", "info", "log", "warn", "error"]) {
-      const original = console[level];
-      console[level] = function(...args) {
-        emit(level, args, "console");
-        return original.apply(this, args);
-      };
-    }
-    window.addEventListener("error", (event) => {
-      emit("error", [event.message, event.filename, event.lineno, event.error], "window");
-    }, true);
-    window.addEventListener("unhandledrejection", (event) => {
-      emit("error", [event.reason], "unhandledrejection");
-    }, true);
-  })();`;
-
-  try {
-    (document.documentElement || document.head || document.body)?.appendChild(script);
-    script.remove();
-  } catch (error) {
-    captureException(error);
-  }
-};
+// Page-world hook removed: injecting inline <script> violates strict CSPs
+// (YouTube, Twitter, etc.). Console capture from the isolated world is
+// sufficient for debugging mods — MAIN-world console interception is not
+// worth breaking pages over.
 
 const sanitizeElement = (element: Element): Element => {
   const clone = element.cloneNode(true) as Element;
@@ -253,16 +196,6 @@ const getElementHtml = (message: GetElementHtmlMessage): RuntimeResult<PageConte
   };
 };
 
-window.addEventListener("message", (event) => {
-  if (event.source !== window || event.data?.source !== PAGE_HOOK_SOURCE) return;
-  chrome.runtime
-    .sendMessage({
-      type: CONTENT_MESSAGE.CONSOLE_EVENT,
-      payload: event.data.payload
-    })
-    .catch(() => undefined);
-});
-
 // Relay Alt/Option key events from the active page to the side panel so the
 // voice hotkey works even when the page (not the side panel) has focus.
 window.addEventListener("keydown", (e) => {
@@ -280,12 +213,6 @@ window.addEventListener("keyup", (e) => {
 });
 
 installIsolatedWorldHooks();
-
-if (document.documentElement) {
-  installPageWorldHooks();
-} else {
-  document.addEventListener("DOMContentLoaded", installPageWorldHooks, { once: true });
-}
 
 chrome.runtime.onMessage.addListener((message: RuntimeRequest, _sender, sendResponse) => {
   try {

@@ -249,6 +249,7 @@ export default function App() {
   const [rules, setRules] = useState<string[]>([]);
   const [modsExpanded, setModsExpanded] = useState(false);
   const [planSteps, setPlanSteps] = useState<PlanStep[]>([]);
+  const [planAwaitingApproval, setPlanAwaitingApproval] = useState(false);
   const [statusText, setStatusText] = useState("Ready");
 
   const socketRef = useRef<WebSocket | null>(null);
@@ -265,11 +266,9 @@ export default function App() {
     projectIdRef.current = projectId;
   }, [projectId]);
 
-  // submitChat is defined later; we forward through a ref so the voice hook
-  // can call it without stale-closure issues.
+  // Transcript fills the input box AND auto-submits (voice = conversational mode).
   const submitChatRef = useRef<((query: string) => Promise<void>) | null>(null);
   const handleVoiceTranscript = useCallback((text: string) => {
-    voiceInitiatedRef.current = true;
     void submitChatRef.current?.(text);
   }, []);
   const { voiceState, voiceError, barAmplitudes, permissionState, activateMic, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
@@ -405,12 +404,18 @@ export default function App() {
         return updated;
       });
       currentAssistantIdRef.current = null;
+      voiceInitiatedRef.current = false;
 
-      // Speak the reply if this turn was voice-initiated
-      if (voiceInitiatedRef.current) {
-        voiceInitiatedRef.current = false;
-        const toSpeak = lastAssistantContentRef.current;
-        if (toSpeak) void speakText(toSpeak.slice(0, 500)); // cap to ~500 chars so TTS isn't too long
+      // Always speak the reply — Conjure is conversational.
+      // Strip markdown symbols and cap at ~400 chars so TTS stays snappy.
+      const raw = lastAssistantContentRef.current;
+      if (raw) {
+        const cleaned = raw
+          .replace(/\*\*Plan:\*\*[\s\S]*/, "") // skip plan blocks
+          .replace(/[*_`#>]/g, "")
+          .replace(/\n+/g, " ")
+          .trim();
+        if (cleaned) void speakText(cleaned.slice(0, 400));
       }
     },
     [speakText]
@@ -571,13 +576,18 @@ export default function App() {
                 const m = /- \[[ x]\]\s+(\d+)\.\s+([^—–-]+)/.exec(line);
                 if (m) steps.push({ id: m[1], title: m[2].trim(), status: "pending" });
               }
-              if (steps.length > 0) setPlanSteps(steps);
+              if (steps.length > 0) {
+                setPlanSteps(steps);
+                setPlanAwaitingApproval(true);
+              }
             }
             return current;
           });
           return;
         }
         case SERVER_EVENT.TOOL_START:
+          // Plan is executing — remove approval buttons
+          setPlanAwaitingApproval(false);
           // Advance plan: mark the first pending step as running when tools start
           setPlanSteps((steps) => {
             const idx = steps.findIndex((s) => s.status === "pending");
@@ -765,7 +775,8 @@ export default function App() {
   const submitChat = useCallback(
     async (query: string, modId?: string) => {
       currentAssistantIdRef.current = null;
-      setPlanSteps([]); // clear previous plan on new turn
+      setPlanSteps([]);
+      setPlanAwaitingApproval(false);
       setMessages((current) => [
         ...current,
         {
@@ -948,6 +959,31 @@ export default function App() {
               </li>
             ))}
           </ol>
+          {planAwaitingApproval && (
+            <div className="plan-approval">
+              <button
+                type="button"
+                className="plan-btn plan-btn--approve"
+                onClick={() => {
+                  setPlanAwaitingApproval(false);
+                  void submitChat("Yes, looks good — go ahead and execute the plan.");
+                }}
+              >
+                ✓ Approve
+              </button>
+              <button
+                type="button"
+                className="plan-btn plan-btn--reject"
+                onClick={() => {
+                  setPlanSteps([]);
+                  setPlanAwaitingApproval(false);
+                  void submitChat("No, cancel this plan.");
+                }}
+              >
+                ✕ Reject
+              </button>
+            </div>
+          )}
         </section>
       )}
 
@@ -1130,16 +1166,27 @@ export default function App() {
         <textarea
           value={input}
           onChange={(event) => setInput(event.target.value)}
-          placeholder="Ask conjure to build a browser customization…"
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              handleSubmit(event as unknown as React.FormEvent<HTMLFormElement>);
+            }
+          }}
+          placeholder="Ask conjure… (Enter to send, Shift+Enter for newline)"
           rows={3}
         />
         <div className="composer-actions">
           <button
             type="button"
-            title={voiceState === "locked" ? "Tap to send voice" : voiceState !== "idle" ? voiceState : "Click to start voice · or hold Alt/Option"}
-            className={`mic-button icon-button${voiceState !== "idle" ? " mic-active" : ""}${voiceState === "locked" ? " mic-locked" : ""}`}
+            title={
+              voiceState === "recording" ? "Click to stop & transcribe" :
+              voiceState === "transcribing" ? "Transcribing…" :
+              voiceState === "speaking" ? "Speaking…" :
+              "Click to start voice"
+            }
+            className={`mic-button icon-button${voiceState === "recording" ? " mic-active" : ""}${voiceState === "speaking" ? " mic-active" : ""}`}
             aria-label="Voice input"
-            onClick={voiceState === "idle" || voiceState === "locked" ? () => void activateMic() : undefined}
+            onClick={voiceState === "idle" || voiceState === "recording" ? () => void activateMic() : undefined}
           >
             {voiceState === "transcribing" ? (
               <Loader2 aria-hidden="true" className="spin" />

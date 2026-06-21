@@ -15,6 +15,8 @@ import {
   type RuntimeRequest,
   type RuntimeResult
 } from "./shared/messages";
+// Amplitude messages from the offscreen doc are forwarded directly to the side
+// panel via the normal runtime broadcast — no routing needed here.
 
 const RELOAD_KEY = "conjure.tabsReloadedForContentHooks";
 const MOD_SCRIPT_PREFIX = "conjure-mod-";
@@ -286,6 +288,169 @@ const reloadAllTabsOnce = async (): Promise<RuntimeResult<{ reloaded: boolean; c
   return { ok: true, data: { reloaded: true, count: reloadable.length } };
 };
 
+/**
+ * Voice capture via tab injection.
+ *
+ * Instead of asking the extension side panel for getUserMedia (which Chrome
+ * often blocks on macOS), we inject a script into the active web tab. The tab
+ * already has mic permission (granted by the user to e.g. youtube.com), so
+ * getUserMedia succeeds immediately. Amplitude data comes back via
+ * chrome.runtime.sendMessage broadcasts that the side panel listens to.
+ */
+
+const getActiveWebTabId = async (): Promise<number | null> => {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs.find((t) => /^https?:\/\//.test(t.url || ""));
+  return typeof tab?.id === "number" ? tab.id : null;
+};
+
+type InjectedStartResult = { ok: true; mimeType: string } | { ok: false; error: string };
+type InjectedStopResult = { ok: true; transcript: string } | { ok: false; error: string };
+
+const handleVoiceStart = async (): Promise<RuntimeResult<{ started: boolean }>> => {
+  const tabId = await getActiveWebTabId();
+  if (tabId === null) {
+    return { ok: false, error: "No active web page — open a website first, then try voice." };
+  }
+  try {
+    const [result] = await chrome.scripting.executeScript<[], InjectedStartResult>({
+      target: { tabId },
+      func: async (): Promise<InjectedStartResult> => {
+        const w = window as Window & {
+          __cqStream?: MediaStream;
+          __cqRecorder?: MediaRecorder;
+          __cqChunks?: Blob[];
+          __cqAmpTimer?: ReturnType<typeof setInterval>;
+          __cqAudioCtx?: AudioContext;
+        };
+        // Clean up any previous session
+        if (w.__cqAmpTimer !== undefined) clearInterval(w.__cqAmpTimer);
+        w.__cqAudioCtx?.close().catch(() => {});
+        w.__cqStream?.getTracks().forEach((t) => t.stop());
+
+        try {
+          w.__cqStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          w.__cqChunks = [];
+
+          const mimeType =
+            ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) =>
+              MediaRecorder.isTypeSupported(m)
+            ) ?? "";
+
+          w.__cqRecorder = new MediaRecorder(
+            w.__cqStream,
+            mimeType ? { mimeType } : undefined
+          );
+          w.__cqRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) w.__cqChunks!.push(e.data);
+          };
+          w.__cqRecorder.start(100);
+
+          // Real-time amplitude → side panel
+          const ctx = new AudioContext();
+          w.__cqAudioCtx = ctx;
+          const src = ctx.createMediaStreamSource(w.__cqStream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 512;
+          analyser.smoothingTimeConstant = 0.7;
+          src.connect(analyser);
+          const buf = new Uint8Array(analyser.frequencyBinCount);
+          const BAR_COUNT = 20;
+          w.__cqAmpTimer = setInterval(() => {
+            analyser.getByteFrequencyData(buf);
+            const usable = Math.floor(buf.length * 0.5);
+            const step = Math.max(1, Math.floor(usable / BAR_COUNT));
+            const bars = Array.from({ length: BAR_COUNT }, (_, i) => {
+              let sum = 0;
+              for (let j = 0; j < step; j++) sum += buf[i * step + j] ?? 0;
+              return Math.min(1, (sum / step / 255) * 2.5);
+            });
+            chrome.runtime.sendMessage({ type: "VOICE_AMPLITUDE", bars }).catch(() => {});
+          }, 50);
+
+          return { ok: true, mimeType: w.__cqRecorder.mimeType };
+        } catch (err) {
+          return { ok: false, error: (err as Error).message };
+        }
+      },
+    });
+
+    if (result?.result?.ok) return { ok: true, data: { started: true } };
+    return { ok: false, error: result?.result?.error ?? "Could not start recording" };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+};
+
+const handleVoiceStop = async (
+  backendUrl: string
+): Promise<RuntimeResult<{ transcript: string }>> => {
+  const tabId = await getActiveWebTabId();
+  if (tabId === null) {
+    return { ok: false, error: "No active web page" };
+  }
+  try {
+    const [result] = await chrome.scripting.executeScript<[string], InjectedStopResult>({
+      target: { tabId },
+      func: async (bUrl: string): Promise<InjectedStopResult> => {
+        const w = window as Window & {
+          __cqStream?: MediaStream;
+          __cqRecorder?: MediaRecorder;
+          __cqChunks?: Blob[];
+          __cqAmpTimer?: ReturnType<typeof setInterval>;
+          __cqAudioCtx?: AudioContext;
+        };
+
+        if (w.__cqAmpTimer !== undefined) clearInterval(w.__cqAmpTimer);
+        w.__cqAudioCtx?.close().catch(() => {});
+
+        const recorder = w.__cqRecorder;
+        if (!recorder || recorder.state === "inactive") {
+          w.__cqStream?.getTracks().forEach((t) => t.stop());
+          return { ok: false, error: "Not recording" };
+        }
+
+        await new Promise<void>((resolve) => {
+          recorder.onstop = () => resolve();
+          recorder.requestData();
+          recorder.stop();
+        });
+
+        w.__cqStream?.getTracks().forEach((t) => t.stop());
+        const mimeType = recorder.mimeType || "audio/webm";
+        const chunks = w.__cqChunks ?? [];
+
+        if (chunks.length === 0) return { ok: false, error: "No audio captured" };
+
+        const blob = new Blob(chunks, { type: mimeType });
+        if (blob.size < 200) return { ok: false, error: "Recording too short — speak louder" };
+
+        try {
+          const res = await fetch(`${bUrl}/voice/transcribe`, {
+            method: "POST",
+            headers: { "Content-Type": mimeType },
+            body: blob,
+          });
+          if (!res.ok) {
+            const body = await res.json().catch(() => null) as { detail?: string } | null;
+            return { ok: false, error: body?.detail ?? `HTTP ${res.status}` };
+          }
+          const data = await res.json() as { transcript: string };
+          return { ok: true, transcript: data.transcript ?? "" };
+        } catch (err) {
+          return { ok: false, error: (err as Error).message };
+        }
+      },
+      args: [backendUrl],
+    });
+
+    if (result?.result?.ok) return { ok: true, data: { transcript: result.result.transcript } };
+    return { ok: false, error: result?.result?.error ?? "Transcription failed" };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+};
+
 const handleRuntimeMessage = async (
   message: RuntimeRequest,
   sender: chrome.runtime.MessageSender
@@ -303,6 +468,14 @@ const handleRuntimeMessage = async (
       return applyMods(message as ApplyModsMessage);
     case BACKGROUND_MESSAGE.REMOVE_MOD:
       return removeMod(message as RemoveModMessage);
+    case BACKGROUND_MESSAGE.VOICE_START: {
+      const m = message as unknown as { backendUrl?: string };
+      return handleVoiceStart(m.backendUrl || "http://localhost:8000");
+    }
+    case BACKGROUND_MESSAGE.VOICE_STOP: {
+      const m = message as unknown as { backendUrl?: string };
+      return handleVoiceStop(m.backendUrl || "http://localhost:8000");
+    }
     case CONTENT_MESSAGE.VOICE_HOTKEY:
       // Relayed from content script to all extension pages (side panel handles it)
       return { ok: true };

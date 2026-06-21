@@ -1,4 +1,4 @@
-import { Loader2, Mic, MicOff, Volume2 } from "lucide-react";
+import { Loader2, Mic, Volume2 } from "lucide-react";
 import type { VoiceState } from "./useVoice";
 import { VOICE_BAR_COUNT } from "./useVoice";
 
@@ -10,11 +10,11 @@ interface Props {
   onActivateMic: () => void;
 }
 
-function Waveform({ barAmplitudes, active }: { barAmplitudes: number[]; active: boolean }) {
+function Waveform({ barAmplitudes }: { barAmplitudes: number[] }) {
   return (
     <div className="waveform" aria-hidden="true">
       {Array.from({ length: VOICE_BAR_COUNT }, (_, i) => {
-        const raw = active ? barAmplitudes[i] ?? 0 : 0;
+        const raw = barAmplitudes[i] ?? 0;
         const minH = 0.06 + Math.sin((i / (VOICE_BAR_COUNT - 1)) * Math.PI) * 0.04;
         const h = Math.max(minH, raw);
         return (
@@ -29,52 +29,22 @@ function Waveform({ barAmplitudes, active }: { barAmplitudes: number[]; active: 
   );
 }
 
-export function VoiceOverlay({
-  voiceState,
-  voiceError,
-  barAmplitudes,
-  permissionState,
-  onActivateMic,
-}: Props) {
-  // Hard blocked — user needs to go to Chrome settings
-  if (permissionState === "denied" || voiceError === "blocked") {
+export function VoiceOverlay({ voiceState, voiceError, barAmplitudes }: Props) {
+  if (voiceState === "idle" && !voiceError) return null;
+
+  if (voiceState === "idle" && voiceError) {
     return (
-      <div className="voice-overlay voice-overlay--error">
-        <MicOff className="vo-icon" aria-hidden="true" />
+      <div className="voice-overlay voice-overlay--error" style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div className="vo-text">
-          <strong>Mic blocked in Chrome</strong>
-          <span>Go to chrome://settings/content/microphone and allow this extension</span>
+          <strong>Voice error</strong>
+          <span>{voiceError}</span>
         </div>
       </div>
     );
   }
-
-  // Dismissed — Chrome showed the prompt but user didn't click Allow
-  if (voiceError === "dismissed") {
-    return (
-      <div className="voice-overlay voice-overlay--warn">
-        <Mic className="vo-icon" aria-hidden="true" />
-        <div className="vo-text">
-          <strong>Allow mic to use voice</strong>
-          <span>Click the button below — Chrome will ask for permission</span>
-        </div>
-        <button className="vo-fix-btn vo-fix-btn--green" onClick={onActivateMic} type="button">
-          Allow &amp; Start
-        </button>
-      </div>
-    );
-  }
-
-  if (voiceState === "idle") return null;
-
-  const isRecording = voiceState === "listening" || voiceState === "locked";
 
   return (
-    <div
-      className={`voice-overlay voice-overlay--${voiceState}`}
-      role="status"
-      aria-live="polite"
-    >
+    <div className={`voice-overlay voice-overlay--${voiceState}`} role="status" aria-live="polite">
       <div className="vo-header">
         <span className="vo-icon-wrap">
           {voiceState === "transcribing" ? (
@@ -85,24 +55,14 @@ export function VoiceOverlay({
             <Mic className="vo-icon" aria-hidden="true" />
           )}
         </span>
-
         <span className="vo-label">
-          {voiceState === "listening" && "Listening"}
-          {voiceState === "locked" && "Recording · tap Alt or 🎙 to send"}
+          {voiceState === "recording" && "Listening — click 🎙 to send"}
           {voiceState === "transcribing" && "Transcribing…"}
           {voiceState === "speaking" && "Speaking…"}
         </span>
-
-        {voiceState === "locked" && <span className="vo-badge">LIVE</span>}
+        {voiceState === "recording" && <span className="vo-badge">REC</span>}
       </div>
-
-      {isRecording && (
-        <Waveform barAmplitudes={barAmplitudes} active={isRecording} />
-      )}
-
-      {voiceState === "listening" && (
-        <span className="vo-hint">Release Alt to send · double-tap Alt to keep recording</span>
-      )}
+      {voiceState === "recording" && <Waveform barAmplitudes={barAmplitudes} />}
     </div>
   );
 }

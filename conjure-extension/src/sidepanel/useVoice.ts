@@ -1,13 +1,14 @@
 /**
- * Wispr-style voice loop.
+ * Click-to-record voice — audio is captured inside the active web tab
+ * (which already has mic permission) via chrome.scripting.executeScript.
  *
- * Hold Alt/Option  → PTT: records while held, sends on release.
- * Double-tap Alt   → lock mode: tap Alt once more to stop + send.
+ * Click mic → start.  Click mic again → stop + transcribe → text in input box.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { BACKGROUND_MESSAGE } from "../shared/messages";
 import { CONJURE_CONFIG } from "../shared/config";
 
-export type VoiceState = "idle" | "listening" | "locked" | "transcribing" | "speaking";
+export type VoiceState = "idle" | "recording" | "transcribing" | "speaking";
 export const VOICE_BAR_COUNT = 20;
 
 export interface UseVoiceOptions {
@@ -19,24 +20,9 @@ export interface UseVoiceReturn {
   voiceError: string | null;
   barAmplitudes: number[];
   permissionState: PermissionState | null;
-  /** Call from a button click to trigger getUserMedia with a guaranteed user gesture */
   activateMic: () => Promise<void>;
   speakText: (text: string) => Promise<void>;
 }
-
-function bestMimeType(): string {
-  for (const mime of [
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/ogg;codecs=opus",
-    "audio/mp4",
-  ]) {
-    if (MediaRecorder.isTypeSupported(mime)) return mime;
-  }
-  return "";
-}
-
-const DOUBLE_TAP_MS = 350;
 
 export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
@@ -44,222 +30,127 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
   const [barAmplitudes, setBarAmplitudes] = useState<number[]>(() =>
     Array(VOICE_BAR_COUNT).fill(0)
   );
-  const [permissionState, setPermissionState] = useState<PermissionState | null>(null);
+  const [permissionState] = useState<PermissionState | null>(null);
 
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const streamRef = useRef<MediaStream | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const animFrameRef = useRef<number | null>(null);
+  const isRecordingRef = useRef(false);
 
-  const isHoldingRef = useRef(false);
-  const isLockedRef = useRef(false);
-  const pttTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingReleaseRef = useRef(false);
+  // Stable ref so keyboard handlers don't go stale
+  const activateMicRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
-  // ── Amplitude loop ────────────────────────────────────────────────────────
-
-  const startAmplitudeLoop = useCallback(() => {
-    const analyser = analyserRef.current;
-    if (!analyser) return;
-    const buf = new Uint8Array(analyser.frequencyBinCount);
-    const tick = () => {
-      analyser.getByteFrequencyData(buf);
-      const usable = Math.floor(buf.length * 0.5);
-      const step = Math.max(1, Math.floor(usable / VOICE_BAR_COUNT));
-      const vals = Array.from({ length: VOICE_BAR_COUNT }, (_, i) => {
-        let sum = 0;
-        for (let j = 0; j < step; j++) sum += buf[i * step + j];
-        return Math.min(1, (sum / step / 255) * 2.5);
-      });
-      setBarAmplitudes(vals);
-      animFrameRef.current = requestAnimationFrame(tick);
-    };
-    animFrameRef.current = requestAnimationFrame(tick);
-  }, []);
-
-  const stopAmplitudeLoop = useCallback(() => {
-    if (animFrameRef.current !== null) {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = null;
-    }
-    setBarAmplitudes(Array(VOICE_BAR_COUNT).fill(0));
-  }, []);
-
-  // ── Stream helpers ────────────────────────────────────────────────────────
-
-  const stopStream = useCallback(() => {
-    stopAmplitudeLoop();
-    audioCtxRef.current?.close().catch(() => {});
-    audioCtxRef.current = null;
-    analyserRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-  }, [stopAmplitudeLoop]);
-
-  // ── Open mic ──────────────────────────────────────────────────────────────
-
-  const openMic = useCallback(async (): Promise<boolean> => {
-    setVoiceError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      streamRef.current = stream;
-      setPermissionState("granted");
-
-      // AudioContext may be suspended in extension context — resume it
-      const ctx = new AudioContext();
-      if (ctx.state === "suspended") await ctx.resume();
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.7;
-      source.connect(analyser);
-      audioCtxRef.current = ctx;
-      analyserRef.current = analyser;
-
-      const mimeType = bestMimeType();
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      chunksRef.current = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      recorder.onerror = (e) => console.error("[voice] recorder error", e);
-      recorder.start(100);
-      recorderRef.current = recorder;
-      startAmplitudeLoop();
-      return true;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[voice] openMic failed:", msg);
-      if (msg.includes("Permission denied") || msg.includes("NotAllowed")) {
-        // "dismissed" = user closed the prompt without choosing; treat as prompt so they can retry
-        if (msg.includes("dismissed")) {
-          setVoiceError("dismissed");
-          setPermissionState("prompt");
-        } else {
-          setVoiceError("blocked");
-          setPermissionState("denied");
-        }
-      } else if (msg.includes("NotFoundError") || msg.includes("Requested device not found")) {
-        setVoiceError("No microphone found.");
-      } else {
-        setVoiceError(msg);
-      }
-      stopStream();
-      return false;
-    }
-  }, [startAmplitudeLoop, stopStream]);
-
-  // ── Close mic + transcribe ────────────────────────────────────────────────
-
-  const closeMicAndTranscribe = useCallback(async () => {
-    const recorder = recorderRef.current;
-    stopAmplitudeLoop();
-
-    if (!recorder || recorder.state === "inactive") {
-      console.warn("[voice] recorder not active, aborting transcription");
-      stopStream();
-      setVoiceState("idle");
-      return;
-    }
-
-    setVoiceState("transcribing");
-
-    // Flush remaining audio and wait for onstop
-    await new Promise<void>((resolve) => {
-      recorder.onstop = () => resolve();
-      recorder.requestData(); // flush any buffered chunk
-      recorder.stop();
-    });
-
-    const mimeType = recorder.mimeType || "audio/webm";
-    const chunks = chunksRef.current.splice(0);
-    stopStream();
-    recorderRef.current = null;
-
-    if (chunks.length === 0) {
-      console.warn("[voice] no audio chunks captured — mic may not be working");
-      setVoiceError("No audio captured. Check mic permissions and try again.");
-      setVoiceState("idle");
-      return;
-    }
-
-    const blob = new Blob(chunks, { type: mimeType });
-    console.log(`[voice] sending ${blob.size} bytes (${mimeType}) to backend`);
-
-    if (blob.size < 200) {
-      console.warn("[voice] blob too small:", blob.size);
-      setVoiceError("Recording too short — speak closer to your mic.");
-      setVoiceState("idle");
-      return;
-    }
-
-    try {
-      const url = `${CONJURE_CONFIG.backendUrl}/voice/transcribe`;
-      console.log("[voice] POST", url);
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": mimeType },
-        body: blob,
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null) as { detail?: string } | null;
-        throw new Error(body?.detail ?? `HTTP ${response.status}`);
-      }
-      const data = await response.json() as { transcript: string };
-      console.log("[voice] transcript:", data.transcript);
-      if (data.transcript.trim()) {
-        onTranscript(data.transcript.trim());
-      } else {
-        setVoiceError("Couldn't hear anything — try speaking louder.");
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[voice] transcription error:", msg);
-      setVoiceError(`Transcription failed: ${msg}`);
-    } finally {
-      setVoiceState("idle");
-    }
-  }, [onTranscript, stopAmplitudeLoop, stopStream]);
-
-  // ── Activate / stop mic from button click (guaranteed user gesture) ──────
+  // Amplitude + hotkey relay both handled in the useEffect below
 
   const activateMic = useCallback(async () => {
-    // If already recording in lock mode → stop + transcribe
-    if (isLockedRef.current) {
-      isLockedRef.current = false;
-      isHoldingRef.current = false;
-      if (pttTimerRef.current) { clearTimeout(pttTimerRef.current); pttTimerRef.current = null; }
-      pendingReleaseRef.current = false;
-      await closeMicRef.current();
+    // ── STOP + TRANSCRIBE ────────────────────────────────────────────────────
+    if (isRecordingRef.current) {
+      isRecordingRef.current = false;
+      setVoiceState("transcribing");
+      setBarAmplitudes(Array(VOICE_BAR_COUNT).fill(0));
+
+      try {
+        const response = (await chrome.runtime.sendMessage({
+          type: BACKGROUND_MESSAGE.VOICE_STOP,
+          backendUrl: CONJURE_CONFIG.backendUrl,
+        })) as { ok: boolean; data?: { transcript: string }; error?: string } | undefined;
+
+        console.log("[voice] stop response:", JSON.stringify(response));
+
+        if (response?.ok) {
+          const text = (response.data?.transcript ?? "").trim();
+          if (text) {
+            onTranscript(text);
+            setVoiceError(null);
+          } else {
+            setVoiceError("Couldn't hear anything — try speaking louder.");
+          }
+        } else {
+          setVoiceError(response?.error ?? "Transcription failed");
+        }
+      } catch (err) {
+        setVoiceError(err instanceof Error ? err.message : "Transcription failed");
+      } finally {
+        setVoiceState("idle");
+      }
       return;
     }
-    if (voiceState !== "idle") return;
+
+    // ── START RECORDING ───────────────────────────────────────────────────────
     setVoiceError(null);
-    const ok = await openMicRef.current();
-    if (ok) {
-      isHoldingRef.current = false;
-      isLockedRef.current = true;
-      setVoiceState("locked");
+    console.log("[voice] sending VOICE_START to background...");
+
+    try {
+      const response = (await chrome.runtime.sendMessage({
+        type: BACKGROUND_MESSAGE.VOICE_START,
+        backendUrl: CONJURE_CONFIG.backendUrl,
+      })) as { ok: boolean; data?: { started: boolean }; error?: string } | undefined;
+
+      console.log("[voice] start response:", JSON.stringify(response));
+
+      if (response?.ok) {
+        isRecordingRef.current = true;
+        setVoiceState("recording");
+      } else {
+        setVoiceError(response?.error ?? "Could not start mic");
+      }
+    } catch (err) {
+      setVoiceError(err instanceof Error ? err.message : "Could not start mic");
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voiceState]);
+  }, [onTranscript]);
+
+  // Keep ref current so keyboard handlers always call latest version
+  useEffect(() => { activateMicRef.current = activateMic; }, [activateMic]);
+
+  // ── Option / Alt key — push-to-talk ───────────────────────────────────────
+  // Press = start recording. Release = stop + transcribe.
+  useEffect(() => {
+    const onDown = (e: KeyboardEvent) => {
+      if (e.key !== "Alt" || e.repeat || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      e.preventDefault();
+      if (!isRecordingRef.current) void activateMicRef.current();
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (e.key !== "Alt") return;
+      e.preventDefault();
+      if (isRecordingRef.current) void activateMicRef.current();
+    };
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    return () => {
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+    };
+  }, []);
+
+  // Relay from content script (web page has focus, not the side panel)
+  useEffect(() => {
+    const onMsg = (msg: { type?: string; event?: string; bars?: number[] }) => {
+      if (msg.type === "VOICE_AMPLITUDE" && Array.isArray(msg.bars)) {
+        setBarAmplitudes(msg.bars);
+        return;
+      }
+      if (msg.type !== "conjure:voice_hotkey") return;
+      if (msg.event === "keydown" && !isRecordingRef.current) {
+        void activateMicRef.current();
+      } else if (msg.event === "keyup" && isRecordingRef.current) {
+        void activateMicRef.current();
+      }
+    };
+    chrome.runtime.onMessage.addListener(onMsg);
+    return () => chrome.runtime.onMessage.removeListener(onMsg);
+  }, []);
 
   // ── TTS ───────────────────────────────────────────────────────────────────
-
   const speakText = useCallback(async (text: string) => {
     if (!text.trim()) return;
     setVoiceState("speaking");
     try {
-      const response = await fetch(`${CONJURE_CONFIG.backendUrl}/voice/speak`, {
+      const res = await fetch(`${CONJURE_CONFIG.backendUrl}/voice/speak`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
-      if (!response.ok) throw new Error("TTS failed");
-      const audioBlob = await response.blob();
-      const url = URL.createObjectURL(audioBlob);
+      if (!res.ok) throw new Error("TTS failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       await new Promise<void>((resolve) => {
         audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
@@ -272,101 +163,6 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
       setVoiceState("idle");
     }
   }, []);
-
-  // ── Keyboard handler (stable — uses refs, no state deps) ──────────────────
-
-  const closeMicRef = useRef(closeMicAndTranscribe);
-  const openMicRef = useRef(openMic);
-  useEffect(() => { closeMicRef.current = closeMicAndTranscribe; }, [closeMicAndTranscribe]);
-  useEffect(() => { openMicRef.current = openMic; }, [openMic]);
-
-  const handleAltDown = useCallback(async () => {
-    // Locked → single tap stops + transcribes
-    if (isLockedRef.current) {
-      isLockedRef.current = false;
-      isHoldingRef.current = false;
-      if (pttTimerRef.current) { clearTimeout(pttTimerRef.current); pttTimerRef.current = null; }
-      pendingReleaseRef.current = false;
-      await closeMicRef.current();
-      return;
-    }
-    // Second tap while PTT-release timer is pending → lock mode
-    if (pendingReleaseRef.current && pttTimerRef.current !== null) {
-      clearTimeout(pttTimerRef.current);
-      pttTimerRef.current = null;
-      pendingReleaseRef.current = false;
-      isLockedRef.current = true;
-      isHoldingRef.current = false;
-      setVoiceState("locked");
-      return;
-    }
-    if (isHoldingRef.current) return;
-    isHoldingRef.current = true;
-    const ok = await openMicRef.current();
-    if (ok) setVoiceState("listening");
-  }, []); // stable
-
-  const handleAltUp = useCallback(() => {
-    if (!isHoldingRef.current || isLockedRef.current) return;
-    isHoldingRef.current = false;
-    pendingReleaseRef.current = true;
-    pttTimerRef.current = setTimeout(async () => {
-      pttTimerRef.current = null;
-      pendingReleaseRef.current = false;
-      if (!isLockedRef.current) await closeMicRef.current();
-    }, DOUBLE_TAP_MS);
-  }, []); // stable
-
-  // Local window keyboard events (side panel has focus)
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Alt" || e.ctrlKey || e.metaKey || e.shiftKey || e.repeat) return;
-      e.preventDefault();
-      void handleAltDown();
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key !== "Alt") return;
-      e.preventDefault();
-      handleAltUp();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-    };
-  }, [handleAltDown, handleAltUp]);
-
-  // Relay from content script (page has focus → Alt pressed on the page)
-  useEffect(() => {
-    const onRuntimeMessage = (message: { type: string; event?: string }) => {
-      if (message.type !== "conjure:voice_hotkey") return;
-      if (message.event === "keydown") void handleAltDown();
-      else if (message.event === "keyup") handleAltUp();
-    };
-    chrome.runtime.onMessage.addListener(onRuntimeMessage);
-    return () => chrome.runtime.onMessage.removeListener(onRuntimeMessage);
-  }, [handleAltDown, handleAltUp]);
-
-  // ── Initial permission check ──────────────────────────────────────────────
-
-  useEffect(() => {
-    navigator.permissions
-      .query({ name: "microphone" as PermissionName })
-      .then((r) => {
-        setPermissionState(r.state);
-        r.onchange = () => setPermissionState(r.state);
-      })
-      .catch(() => {});
-  }, []);
-
-  // ── Cleanup ───────────────────────────────────────────────────────────────
-
-  useEffect(() => () => {
-    if (pttTimerRef.current) clearTimeout(pttTimerRef.current);
-    try { recorderRef.current?.stop(); } catch { /* ignore */ }
-    stopStream();
-  }, [stopStream]);
 
   return { voiceState, voiceError, barAmplitudes, permissionState, activateMic, speakText };
 }

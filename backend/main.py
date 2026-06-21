@@ -37,7 +37,7 @@ async def health() -> dict[str, str]:
 
 @app.post("/voice/transcribe")
 async def voice_transcribe(request: Request) -> dict[str, str]:
-    """Accept raw audio from the extension and return a Deepgram transcript."""
+    """Accept raw audio from the extension and return an ElevenLabs Scribe transcript."""
     audio = await request.body()
     content_type = request.headers.get("content-type", "audio/webm")
     try:
@@ -49,7 +49,7 @@ async def voice_transcribe(request: Request) -> dict[str, str]:
 
 @app.post("/voice/speak")
 async def voice_speak(body: dict[str, str]) -> Response:
-    """Convert assistant reply text to MP3 via Deepgram Aura TTS."""
+    """Convert assistant reply text to MP3 via ElevenLabs TTS."""
     text = body.get("text", "").strip()
     if not text:
         raise HTTPException(status_code=422, detail="text is required")

@@ -60,6 +60,53 @@ Building a mod:
 - create_file for new files; write_file to overwrite. Never retry create_file on existing paths.
 - Call verify_mod after writing. Fix and retry once if it fails.
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SMART ACTIVITY DETECTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+When the user talks about "spending too much time", "scrolling too much", "doomscrolling", or any
+time/usage tracking, you MUST track REAL engagement — not just scroll events:
+
+• Use a combination of signals: scroll, mousemove, keydown, click, video timeupdate (for YouTube/video),
+  audio playing, and visibility.
+
+• ALWAYS use document.addEventListener('visibilitychange', ...) to PAUSE timers when the page is
+  hidden and RESUME when it's visible again. This also handles window switching.
+
+• Example for YouTube time tracking:
+    let engaged = 0;
+    let lastTick = null;
+    function tick() {
+      if (!document.hidden) engaged++;
+    }
+    setInterval(tick, 1000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) clearInterval(tickId);
+      else tickId = setInterval(tick, 1000);
+    });
+    // Also listen for video play
+    document.addEventListener('play', () => { /* start tracking */ }, true);
+
+• For timers shown to the user: update them with requestAnimationFrame so they stay smooth.
+  Pause rAF loops when document.hidden = true to avoid throttling side effects.
+
+• When the user says "if I scroll too much" on a video-heavy site (YouTube, TikTok, Twitter),
+  interpret it as TOTAL SCREEN TIME on that site, not just physical scroll events.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MOD LIFECYCLE (WINDOW FOCUS)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Every mod with timers or animations MUST handle tab/window focus:
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      // pause: clearInterval, cancelAnimationFrame, video.pause() if needed
+    } else {
+      // resume: restart intervals, requestAnimationFrame, etc.
+    }
+  });
+
+This ensures mods "freeze" when the user switches away and RESUME correctly when they return.
+
 General:
 - Never hardcode secrets.
 - Be concise in responses — the user sees a small side panel.
