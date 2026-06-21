@@ -9,6 +9,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from .utils.agent import ConjureAgent
 from .utils.config import load_settings
+from .utils.memory import extract_and_save_rules
 from .utils.store import create_store
 
 
@@ -157,6 +158,10 @@ async def _handle_chat_message(
     content = "".join(content_parts)
     await _persist_turn(store, conversation_id, query, content)
 
+    new_rules = await _update_memory(store, project_id, history, rules, query, content)
+    if new_rules:
+        await websocket.send_json({"type": "rules_updated", "rules": new_rules})
+
     await websocket.send_json(
         {
             "type": "done",
@@ -164,6 +169,34 @@ async def _handle_chat_message(
             "content": content,
         }
     )
+
+
+async def _update_memory(
+    store: Any | None,
+    project_id: str,
+    prior_history: list[dict[str, Any]],
+    existing_rules: list[str],
+    query: str,
+    content: str,
+) -> list[str]:
+    """Extract and persist new agent-memory rules from the completed turn.
+
+    Runs after the turn so a stated preference ("always ...", "remember ...")
+    becomes a durable rule injected into future system prompts. Best-effort:
+    never blocks or fails the chat response."""
+    if store is None:
+        return []
+    full_history = [
+        *prior_history,
+        {"role": "user", "content": query},
+        {"role": "assistant", "content": content},
+    ]
+    try:
+        return await extract_and_save_rules(
+            store, project_id, full_history, existing_rules=existing_rules
+        )
+    except Exception:
+        return []
 
 
 async def _prepare_conversation(
