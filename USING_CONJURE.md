@@ -8,9 +8,9 @@ session no longer resets.
 
 1. Type a request in the Conjure side panel (e.g. "remove YouTube Shorts").
 2. The backend generates a small MV3 extension under `demo_code/<project>/`.
-3. **Conjure applies it for you** — it injects the generated script + CSS into
-   matching tabs and reloads them. You never open `chrome://extensions` to load
-   or reload anything.
+3. **Conjure applies it for you** — it injects the generated script + CSS and
+   reloads only your current tab when it matches. You never open
+   `chrome://extensions` to load or reload anything.
 4. Your conversation is saved, so closing/reopening the panel (or restarting the
    backend) keeps your history.
 
@@ -47,6 +47,8 @@ bundle in its own folder under `demo_code/<project>/mods/<mod_id>/`, tracked in
   browser (its `chrome.userScripts` entry `conjure-mod-<id>` is removed).
 - Each mod shows a verification badge: `verified` / `failed` / `unverified`, with
   a link to the Browserbase **sandbox replay** when available.
+- A single mod can support multiple websites. Its card lists every matched site,
+  and Conjure keeps one shared mod instead of creating a copy per website.
 
 ### Build vs. reuse (test-before-remake)
 
@@ -55,6 +57,9 @@ When you ask for something new, Conjure first checks the existing mods:
 - If a mod already implements your request, it runs that mod through the
   **Browserbase sandbox** to confirm it still works. If it passes, Conjure does
   **not** rebuild it — it tells you it already exists and is verified.
+- If you ask to extend the same behavior to another website, Conjure updates the
+  existing mod's match patterns and shared implementation instead of adding a
+  duplicate. Verification then checks every matched website.
 - If no mod matches, or the sandbox check fails, Conjure builds (or rebuilds) it.
 - Editing a mod's prompt skips this check and rebuilds immediately.
 
@@ -79,7 +84,7 @@ DELETE /projects/<project>/mods/<mod_id>   # remove a mod
   `chrome.userScripts.register(...)` under a stable id (`conjure-mod-<mod_id>`),
   re-registering (not duplicating) on every new version and unregistering any mod
   that was removed.
-- It then reloads any open tabs that match, so the change is visible immediately.
+- It reloads the current tab when it matches, so other open tabs are undisturbed.
 - Registered user scripts **persist across browser restarts**, so each
   customization keeps applying to future page loads automatically.
 

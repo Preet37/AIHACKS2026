@@ -234,6 +234,7 @@ export default function App() {
   const [findings, setFindings] = useState<AgentFinding[]>([]);
   const [findingStatus, setFindingStatus] = useState<"idle" | "running" | "done" | "error">("idle");
   const [findingError, setFindingError] = useState<string | null>(null);
+  const [replayUrl, setReplayUrl] = useState<string | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const pendingOpenRef = useRef<Promise<WebSocket> | null>(null);
@@ -267,7 +268,7 @@ export default function App() {
           const { applied, reloaded } = response.data;
           setStatusText(`Applied ${applied} mod(s)`);
           if (reloaded > 0) {
-            addSystemMessage(`Applied ${applied} mod(s) and reloaded ${reloaded} matching tab(s).`);
+            addSystemMessage(`Applied ${applied} mod(s) and reloaded the current tab.`);
           }
           return;
         }
@@ -374,9 +375,9 @@ export default function App() {
     currentAssistantIdRef.current = null;
   }, []);
 
-  const getActiveTabs = useCallback(async () => {
+  const getCurrentTab = useCallback(async () => {
     const response = await chrome.runtime.sendMessage({
-      type: BACKGROUND_MESSAGE.GET_ACTIVE_TABS
+      type: BACKGROUND_MESSAGE.GET_CURRENT_TAB
     });
 
     if (isRuntimeOk<ActiveTabSnapshot[]>(response)) {
@@ -452,7 +453,7 @@ export default function App() {
     []
   );
 
-  // Scrape the active tab and hand it to the Fetch.ai agent to find matching items.
+  // Hand the current URL and its cookies to the off-device browser agent.
   const runAgentTask = useCallback(
     async (taskInput: string) => {
       const task = taskInput.trim();
@@ -460,23 +461,25 @@ export default function App() {
       setFindingStatus("running");
       setFindingError(null);
       setFindings([]);
-      setStatusText("Fetch.ai agent is searching this page...");
+      setReplayUrl(null);
+      setStatusText("Spinning up a cloud browser to search...");
       try {
-        const tabs = await getActiveTabs();
+        const tabs = await getCurrentTab();
         const tab = tabs.find((candidate) => candidate.active) || tabs[0];
-        if (!tab?.id) {
-          throw new Error("No active tab available to search.");
+        if (!tab?.url) {
+          throw new Error("No active tab URL to search.");
         }
-        const page = await getPageContentFromTab(tab.id, makeId(), true);
+        let cookies: chrome.cookies.Cookie[] = [];
+        try {
+          cookies = await chrome.cookies.getAll({ url: tab.url });
+        } catch {
+          // The remote agent can still search public content while logged out.
+          cookies = [];
+        }
         const response = await fetch(createAgentTaskUrl(projectIdRef.current), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            task,
-            url: page.url,
-            text: page.text,
-            html: page.html
-          })
+          body: JSON.stringify({ task, url: tab.url, cookies })
         });
         if (!response.ok) {
           let detail = `Backend returned ${response.status}.`;
@@ -491,6 +494,7 @@ export default function App() {
         const data = (await response.json()) as AgentTaskResponse;
         const results = data.findings || [];
         setFindings(results);
+        setReplayUrl(data.replay_url || null);
         setFindingStatus("done");
         setStatusText(
           results.length ? `Found ${results.length} item(s)` : "No matching items found"
@@ -502,7 +506,7 @@ export default function App() {
         setStatusText("Agent task failed");
       }
     },
-    [getActiveTabs, getPageContentFromTab]
+    [getCurrentTab]
   );
 
   const handleRequestTabContent = useCallback(
@@ -733,7 +737,7 @@ export default function App() {
       ]);
 
       try {
-        const tabs = await getActiveTabs();
+        const tabs = await getCurrentTab();
         const socket = await openSocket();
         socket.send(
           JSON.stringify({
@@ -750,7 +754,7 @@ export default function App() {
         addSystemMessage(error instanceof Error ? error.message : String(error));
       }
     },
-    [addSystemMessage, conversationId, getActiveTabs, openSocket]
+    [addSystemMessage, conversationId, getCurrentTab, openSocket]
   );
 
   const handleSubmit = async (event: FormEvent) => {
@@ -777,7 +781,7 @@ export default function App() {
   };
 
   const refreshTabs = async () => {
-    await getActiveTabs();
+    await getCurrentTab();
   };
 
   // Restore the previous session so closing/reopening the side panel (or a
@@ -816,11 +820,11 @@ export default function App() {
   }, [projectId, conversationId, messages]);
 
   useEffect(() => {
-    void getActiveTabs();
+    void getCurrentTab();
     chrome.runtime
-      .sendMessage({ type: BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE })
+      .sendMessage({ type: BACKGROUND_MESSAGE.RELOAD_CURRENT_TAB_ONCE })
       .catch(captureException);
-  }, [getActiveTabs]);
+  }, [getCurrentTab]);
 
   // Load the mod list and (re)apply every active mod whenever the project changes.
   useEffect(() => {
@@ -896,20 +900,20 @@ export default function App() {
           onChange={(event) => setProjectId(event.target.value)}
           disabled={connectionState === "connected"}
         />
-        <button type="button" title="Refresh active tabs" onClick={refreshTabs} className="icon-button">
+        <button type="button" title="Refresh current tab" onClick={refreshTabs} className="icon-button">
           <RefreshCcw aria-hidden="true" />
         </button>
       </section>
 
-      <section className="tabs-strip" aria-label="Open tabs">
-        {activeTabs.slice(0, 6).map((tab) => (
+      <section className="tabs-strip" aria-label="Current tab">
+        {activeTabs.map((tab) => (
           <button
             key={tab.id}
             className={`tab-chip ${tab.active ? "active" : ""}`}
             title={tab.url}
             type="button"
           >
-            <span>{tab.active ? "Active" : "Tab"}</span>
+            <span>Current tab</span>
             <strong>{tab.title}</strong>
           </button>
         ))}
@@ -1029,6 +1033,13 @@ export default function App() {
           </button>
         </form>
 
+        {replayUrl ? (
+          <a className="replay-link" href={replayUrl} target="_blank" rel="noreferrer">
+            <ExternalLink aria-hidden="true" />
+            Watch the agent browse
+          </a>
+        ) : null}
+
         {findingStatus === "error" && findingError ? (
           <div className="status-line failed">
             <AlertTriangle aria-hidden="true" />
@@ -1106,6 +1117,13 @@ export default function App() {
                     <span className={`mod-badge ${verdict}`}>{verdict}</span>
                   </div>
                   <p className="mod-prompt">{mod.prompt}</p>
+                  {mod.websites?.length ? (
+                    <div className="mod-websites" aria-label="Supported websites">
+                      {mod.websites.map((website) => (
+                        <span key={website}>{website}</span>
+                      ))}
+                    </div>
+                  ) : null}
                   {verified?.replay_url ? (
                     <a
                       className="replay-link"

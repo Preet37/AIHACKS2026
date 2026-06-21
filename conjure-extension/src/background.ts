@@ -16,7 +16,7 @@ import {
   type RuntimeResult
 } from "./shared/messages";
 
-const RELOAD_KEY = "conjure.tabsReloadedForContentHooks";
+const RELOADED_CURRENT_TABS_KEY = "conjure.currentTabsReloadedForContentHooks";
 const MOD_SCRIPT_PREFIX = "conjure-mod-";
 const consoleLogsByTab = new Map<number, ConsoleLogEntry[]>();
 
@@ -66,14 +66,22 @@ const buildUserScriptCode = (bundle: GeneratedBundle, scriptId: string): string 
   ].join("\n");
 };
 
-const reloadMatchingTabs = async (matches: string[]): Promise<number> => {
+const reloadCurrentMatchingTab = async (matches: string[]): Promise<number> => {
   const patterns = matches.filter((pattern) => pattern && pattern !== "<all_urls>");
-  if (patterns.length === 0) return 0;
+  const matchesAllUrls = matches.includes("<all_urls>");
+  if (patterns.length === 0 && !matchesAllUrls) return 0;
   try {
-    const tabs = await chrome.tabs.query({ url: patterns });
-    const reloadable = tabs.filter((tab) => typeof tab.id === "number");
-    await Promise.allSettled(reloadable.map((tab) => chrome.tabs.reload(tab.id as number)));
-    return reloadable.length;
+    const tabs = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+      ...(!matchesAllUrls && patterns.length > 0 ? { url: patterns } : {})
+    });
+    const current = tabs.find(
+      (tab) => typeof tab.id === "number" && /^https?:\/\//.test(tab.url || "")
+    );
+    if (typeof current?.id !== "number") return 0;
+    await chrome.tabs.reload(current.id);
+    return 1;
   } catch {
     return 0;
   }
@@ -123,7 +131,7 @@ const registerMod = async (userScripts: UserScriptsApi, bundle: GeneratedBundle)
 
 /**
  * Apply the full set of active mods: register/refresh each, unregister any that
- * disappeared, and reload affected tabs so changes show immediately.
+ * disappeared, and reload the current tab when affected so changes show immediately.
  */
 const applyMods = async (message: ApplyModsMessage): Promise<RuntimeResult<ApplyModsResult>> => {
   const userScripts = getUserScriptsApi();
@@ -148,7 +156,7 @@ const applyMods = async (message: ApplyModsMessage): Promise<RuntimeResult<Apply
   }
 
   const removed = await unregisterStaleMods(userScripts, keepIds);
-  const reloaded = await reloadMatchingTabs([...matchesToReload]);
+  const reloaded = await reloadCurrentMatchingTab([...matchesToReload]);
   return { ok: true, data: { applied, removed, reloaded } };
 };
 
@@ -172,7 +180,7 @@ const removeMod = async (message: RemoveModMessage): Promise<RuntimeResult<{ rem
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
-  await reloadMatchingTabs(reloadMatches);
+  await reloadCurrentMatchingTab(reloadMatches);
   return { ok: true, data: { removed: true } };
 };
 
@@ -259,8 +267,8 @@ const getConsoleLogs = (message: GetConsoleLogsMessage): RuntimeResult<ConsoleLo
   return { ok: true, data: logs.slice(Math.max(0, logs.length - limit)) };
 };
 
-const getActiveTabs = async (): Promise<RuntimeResult<ActiveTabSnapshot[]>> => {
-  const tabs = await chrome.tabs.query({});
+const getCurrentTab = async (): Promise<RuntimeResult<ActiveTabSnapshot[]>> => {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return {
     ok: true,
     data: tabs
@@ -269,21 +277,28 @@ const getActiveTabs = async (): Promise<RuntimeResult<ActiveTabSnapshot[]>> => {
   };
 };
 
-const reloadAllTabsOnce = async (): Promise<RuntimeResult<{ reloaded: boolean; count: number }>> => {
-  const stored = await chrome.storage.local.get(RELOAD_KEY);
-  if (stored[RELOAD_KEY]) {
+const reloadCurrentTabOnce = async (): Promise<RuntimeResult<{ reloaded: boolean; count: number }>> => {
+  const [current] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (typeof current?.id !== "number" || !/^https?:\/\//.test(current.url || "")) {
     return { ok: true, data: { reloaded: false, count: 0 } };
   }
 
-  const tabs = await chrome.tabs.query({});
-  const reloadable = tabs.filter(
-    (tab) => typeof tab.id === "number" && /^https?:\/\//.test(tab.url || "")
-  );
+  const stored = await chrome.storage.local.get(RELOADED_CURRENT_TABS_KEY);
+  const reloadedTabIds = Array.isArray(stored[RELOADED_CURRENT_TABS_KEY])
+    ? (stored[RELOADED_CURRENT_TABS_KEY] as unknown[]).filter(
+        (tabId): tabId is number => typeof tabId === "number"
+      )
+    : [];
+  if (reloadedTabIds.includes(current.id)) {
+    return { ok: true, data: { reloaded: false, count: 0 } };
+  }
 
-  await Promise.allSettled(reloadable.map((tab) => chrome.tabs.reload(tab.id as number)));
-  await chrome.storage.local.set({ [RELOAD_KEY]: true });
+  await chrome.tabs.reload(current.id);
+  await chrome.storage.local.set({
+    [RELOADED_CURRENT_TABS_KEY]: [...reloadedTabIds, current.id].slice(-100)
+  });
 
-  return { ok: true, data: { reloaded: true, count: reloadable.length } };
+  return { ok: true, data: { reloaded: true, count: 1 } };
 };
 
 const handleRuntimeMessage = async (
@@ -295,10 +310,10 @@ const handleRuntimeMessage = async (
       return appendConsoleLog(message, sender);
     case BACKGROUND_MESSAGE.GET_CONSOLE_LOGS:
       return getConsoleLogs(message);
-    case BACKGROUND_MESSAGE.GET_ACTIVE_TABS:
-      return getActiveTabs();
-    case BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE:
-      return reloadAllTabsOnce();
+    case BACKGROUND_MESSAGE.GET_CURRENT_TAB:
+      return getCurrentTab();
+    case BACKGROUND_MESSAGE.RELOAD_CURRENT_TAB_ONCE:
+      return reloadCurrentTabOnce();
     case BACKGROUND_MESSAGE.APPLY_MODS:
       return applyMods(message as ApplyModsMessage);
     case BACKGROUND_MESSAGE.REMOVE_MOD:

@@ -491,6 +491,8 @@ async def list_mods() -> str:
             "name": record.get("name"),
             "prompt": record.get("prompt"),
             "status": record.get("status"),
+            "matches": record.get("matches", []),
+            "websites": record.get("websites", []),
             "last_verified": record.get("last_verified"),
         }
         for record in records
@@ -523,8 +525,9 @@ async def start_mod(prompt: str, name: str = "", mod_id: str | None = None) -> s
 async def verify_mod(mod_id: str | None = None, target_url: str | None = None) -> str:
     """Verify a mod by running its extension in the Browserbase sandbox.
 
-    Defaults to the mod currently being built. Streams sandbox progress to the
-    UI and records the pass/fail verdict on the mod."""
+    Defaults to the mod currently being built. Without an explicit target_url,
+    every distinct website in the manifest matches is verified. Streams sandbox
+    progress to the UI and records one aggregate pass/fail verdict on the mod."""
     from . import mods
     from .sandbox import run_in_sandbox as sandbox_run
 
@@ -544,37 +547,77 @@ async def verify_mod(mod_id: str | None = None, target_url: str | None = None) -
     if bundle is None:
         return _json({"error": "Mod has no usable manifest/content scripts to verify yet."})
 
-    resolved_url = target_url or mods.target_url_for_matches(bundle.get("matches", []))
+    target_urls = (
+        [target_url]
+        if target_url
+        else mods.target_urls_for_matches(bundle.get("matches", []))
+    )
     outbound = _outbound_queue_var.get()
-    if outbound is not None:
-        await outbound.put({"type": "sandbox_start", "target_url": resolved_url, "mod_id": mod_id})
+    results: list[dict[str, Any]] = []
+    for resolved_url in target_urls:
+        if outbound is not None:
+            await outbound.put(
+                {"type": "sandbox_start", "target_url": resolved_url, "mod_id": mod_id}
+            )
 
-    result = await sandbox_run(directory, target_url=resolved_url, feature_description=record.get("prompt"))
-    data = result.to_dict() if hasattr(result, "to_dict") else dict(result)
-
-    if outbound is not None:
-        if data.get("screenshot"):
-            await outbound.put({"type": "sandbox_screenshot", "data": data["screenshot"], "mod_id": mod_id})
-        await outbound.put(
-            {
-                "type": "sandbox_result",
-                "passed": bool(data.get("passed")),
-                "findings": data.get("findings", []),
-                "replay_url": data.get("replay_url"),
-                "mod_id": mod_id,
-            }
+        result = await sandbox_run(
+            directory,
+            target_url=resolved_url,
+            feature_description=record.get("prompt"),
         )
+        data = result.to_dict() if hasattr(result, "to_dict") else dict(result)
+        result_summary = {
+            "target_url": resolved_url,
+            "passed": bool(data.get("passed")),
+            "source": data.get("source"),
+            "findings": data.get("findings", []),
+            "replay_url": data.get("replay_url"),
+        }
+        results.append(result_summary)
+
+        if outbound is not None:
+            if data.get("screenshot"):
+                await outbound.put(
+                    {
+                        "type": "sandbox_screenshot",
+                        "data": data["screenshot"],
+                        "target_url": resolved_url,
+                        "mod_id": mod_id,
+                    }
+                )
+            await outbound.put(
+                {
+                    "type": "sandbox_result",
+                    **result_summary,
+                    "mod_id": mod_id,
+                }
+            )
+
+    passed = all(result["passed"] for result in results)
+    findings = [
+        f"{result['target_url']}: {finding}"
+        for result in results
+        for finding in result.get("findings", [])
+    ]
+    sources = {result.get("source") for result in results}
+    source = results[0].get("source") if len(sources) == 1 else "multi_site"
+    replay_url = next(
+        (result.get("replay_url") for result in results if result.get("replay_url")),
+        None,
+    )
 
     mods.upsert_mod(
         project_dir,
         {
             "id": mod_id,
             "last_verified": {
-                "passed": bool(data.get("passed")),
-                "source": data.get("source"),
-                "target_url": resolved_url,
-                "replay_url": data.get("replay_url"),
-                "findings": data.get("findings", []),
+                "passed": passed,
+                "source": source,
+                "target_url": target_urls[0],
+                "target_urls": target_urls,
+                "replay_url": replay_url,
+                "findings": findings,
+                "results": results,
                 "at": time.time(),
             },
         },
@@ -583,10 +626,12 @@ async def verify_mod(mod_id: str | None = None, target_url: str | None = None) -
     return _json(
         {
             "mod_id": mod_id,
-            "passed": bool(data.get("passed")),
-            "source": data.get("source"),
-            "findings": data.get("findings", []),
-            "replay_url": data.get("replay_url"),
+            "passed": passed,
+            "source": source,
+            "target_urls": target_urls,
+            "findings": findings,
+            "replay_url": replay_url,
+            "results": results,
         }
     )
 
