@@ -5,20 +5,57 @@ import contextlib
 import uuid
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 
+from .utils import mods as mods_registry
 from .utils.agent import ConjureAgent
 from .utils.config import load_settings
 from .utils.memory import extract_and_save_rules
 from .utils.store import create_store
+from .utils.tools import project_dir_for
 
 
 app = FastAPI(title="conjure backend")
+
+# The Chrome extension (side panel + service worker) fetches the generated
+# bundle over HTTP from a different origin, so allow cross-origin reads.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "conjure-backend"}
+
+
+@app.get("/projects/{project_id}/mods")
+async def list_project_mods(project_id: str) -> dict[str, Any]:
+    """List every mod (browser customization) built for this project."""
+    project_dir = project_dir_for(load_settings(), project_id)
+    return {"project_id": project_id, "mods": mods_registry.list_mods(project_dir)}
+
+
+@app.get("/projects/{project_id}/mods/bundle")
+async def get_project_mod_bundles(project_id: str) -> dict[str, Any]:
+    """Return every active mod's content-script bundle for the extension to apply."""
+    project_dir = project_dir_for(load_settings(), project_id)
+    bundles = mods_registry.active_bundles(project_dir)
+    return {"project_id": project_id, "ready": bool(bundles), "bundles": bundles}
+
+
+@app.delete("/projects/{project_id}/mods/{mod_id}")
+async def delete_project_mod(project_id: str, mod_id: str) -> dict[str, Any]:
+    """Remove a mod and its generated files."""
+    project_dir = project_dir_for(load_settings(), project_id)
+    deleted = mods_registry.delete_mod(project_dir, mod_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"No mod with id {mod_id}")
+    return {"project_id": project_id, "deleted": mod_id, "mods": mods_registry.list_mods(project_dir)}
 
 
 @app.websocket("/ws/{project_id}")
@@ -135,6 +172,16 @@ async def _handle_chat_message(
     )
     await websocket.send_json({"type": "conversation_id", "conversation_id": conversation_id})
 
+    # When the panel sends a mod_id, this turn edits that mod (a prompt change),
+    # so refresh its stored prompt up front and route generation into it.
+    active_mod_id = message.get("mod_id") or None
+    if active_mod_id:
+        project_dir = project_dir_for(load_settings(), project_id)
+        if mods_registry.get_mod(project_dir, active_mod_id) is not None:
+            mods_registry.upsert_mod(project_dir, {"id": active_mod_id, "prompt": query})
+        else:
+            active_mod_id = None
+
     content_parts: list[str] = []
     try:
         async for event in agent.stream_chat_response(
@@ -145,6 +192,7 @@ async def _handle_chat_message(
             pending_tab_requests=pending_tab_requests,
             rules=rules,
             history=history,
+            active_mod_id=active_mod_id,
         ):
             if event.get("type") == "content":
                 content_parts.append(str(event.get("content", "")))
@@ -161,6 +209,8 @@ async def _handle_chat_message(
     new_rules = await _update_memory(store, project_id, history, rules, query, content)
     if new_rules:
         await websocket.send_json({"type": "rules_updated", "rules": new_rules})
+
+    await _emit_mods_state(websocket, project_id)
 
     await websocket.send_json(
         {
@@ -197,6 +247,28 @@ async def _update_memory(
         )
     except Exception:
         return []
+
+
+async def _emit_mods_state(websocket: WebSocket, project_id: str) -> None:
+    """Push the current mod list and the active bundles so the panel can refresh
+    its Mods list and (re)apply every active mod to the browser."""
+    try:
+        project_dir = project_dir_for(load_settings(), project_id)
+        mods = mods_registry.list_mods(project_dir)
+        bundles = mods_registry.active_bundles(project_dir)
+    except Exception:
+        return
+
+    await websocket.send_json({"type": "mods_updated", "project_id": project_id, "mods": mods})
+    if bundles:
+        await websocket.send_json(
+            {
+                "type": "extension_ready",
+                "project_id": project_id,
+                "path": str(project_dir),
+                "bundles": bundles,
+            }
+        )
 
 
 async def _prepare_conversation(

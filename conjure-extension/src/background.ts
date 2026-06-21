@@ -4,16 +4,177 @@ import {
   BACKGROUND_MESSAGE,
   CONTENT_MESSAGE,
   type ActiveTabSnapshot,
+  type ApplyModsMessage,
+  type ApplyModsResult,
   type ConsoleLogEntry,
   type ConsoleLevel,
   type ContentConsoleEventMessage,
+  type GeneratedBundle,
   type GetConsoleLogsMessage,
+  type RemoveModMessage,
   type RuntimeRequest,
   type RuntimeResult
 } from "./shared/messages";
 
 const RELOAD_KEY = "conjure.tabsReloadedForContentHooks";
+const MOD_SCRIPT_PREFIX = "conjure-mod-";
 const consoleLogsByTab = new Map<number, ConsoleLogEntry[]>();
+
+// chrome.userScripts is only present when the user has enabled developer mode
+// (or the per-extension "Allow user scripts" toggle). Access it defensively so
+// the rest of the worker keeps running when it is unavailable.
+type UserScriptsApi = {
+  register: (scripts: unknown[]) => Promise<void>;
+  unregister: (filter: { ids: string[] }) => Promise<void>;
+  getScripts: (filter?: { ids?: string[] }) => Promise<Array<{ id: string; matches?: string[] }>>;
+  configureWorld?: (props: Record<string, unknown>) => Promise<void>;
+};
+
+const getUserScriptsApi = (): UserScriptsApi | undefined =>
+  (chrome as unknown as { userScripts?: UserScriptsApi }).userScripts;
+
+const modScriptId = (modId: string) => `${MOD_SCRIPT_PREFIX}${modId}`;
+
+const VALID_RUN_AT = new Set(["document_start", "document_end", "document_idle"]);
+
+const userScriptsUnavailableError =
+  "Conjure can't auto-apply yet. Open chrome://extensions, find Conjure, and turn on " +
+  "“Allow user scripts” (or enable Developer mode), then reload Conjure.";
+
+/**
+ * Build a single self-contained user-script string from the generated bundle.
+ * The CSS is embedded as a JSON literal and injected as a <style> element, then
+ * the generated JS runs. Both pieces are produced by the agent.
+ */
+const buildUserScriptCode = (bundle: GeneratedBundle, scriptId: string): string => {
+  const cssLiteral = JSON.stringify(bundle.css || "");
+  const idLiteral = JSON.stringify(scriptId);
+  return [
+    "(function () {",
+    `  var __conjureCss = ${cssLiteral};`,
+    "  if (__conjureCss && __conjureCss.trim()) {",
+    "    var __existing = document.querySelector('style[data-conjure=' + JSON.stringify(" + idLiteral + ") + ']');",
+    "    if (!__existing) {",
+    "      var __style = document.createElement('style');",
+    `      __style.setAttribute('data-conjure', ${idLiteral});`,
+    "      __style.textContent = __conjureCss;",
+    "      (document.head || document.documentElement).appendChild(__style);",
+    "    }",
+    "  }",
+    "})();",
+    bundle.js || ""
+  ].join("\n");
+};
+
+const reloadMatchingTabs = async (matches: string[]): Promise<number> => {
+  const patterns = matches.filter((pattern) => pattern && pattern !== "<all_urls>");
+  if (patterns.length === 0) return 0;
+  try {
+    const tabs = await chrome.tabs.query({ url: patterns });
+    const reloadable = tabs.filter((tab) => typeof tab.id === "number");
+    await Promise.allSettled(reloadable.map((tab) => chrome.tabs.reload(tab.id as number)));
+    return reloadable.length;
+  } catch {
+    return 0;
+  }
+};
+
+/** Unregister every previously-registered mod script that is no longer present. */
+const unregisterStaleMods = async (
+  userScripts: UserScriptsApi,
+  keepIds: Set<string>
+): Promise<number> => {
+  let removed = 0;
+  try {
+    const registered = await userScripts.getScripts();
+    const stale = registered
+      .map((script) => script.id)
+      .filter((id) => id.startsWith(MOD_SCRIPT_PREFIX) && !keepIds.has(id));
+    for (const id of stale) {
+      await userScripts.unregister({ ids: [id] });
+      removed += 1;
+    }
+  } catch {
+    // best effort
+  }
+  return removed;
+};
+
+/** Register/refresh one mod as a persistent user script. */
+const registerMod = async (userScripts: UserScriptsApi, bundle: GeneratedBundle): Promise<boolean> => {
+  if (!bundle.mod_id || !bundle.matches?.length) return false;
+  const scriptId = modScriptId(bundle.mod_id);
+  const runAt = VALID_RUN_AT.has(bundle.run_at) ? bundle.run_at : "document_idle";
+  const existing = await userScripts.getScripts({ ids: [scriptId] });
+  if (existing.length > 0) {
+    await userScripts.unregister({ ids: [scriptId] });
+  }
+  await userScripts.register([
+    {
+      id: scriptId,
+      matches: bundle.matches,
+      js: [{ code: buildUserScriptCode(bundle, scriptId) }],
+      runAt,
+      world: "USER_SCRIPT"
+    }
+  ]);
+  return true;
+};
+
+/**
+ * Apply the full set of active mods: register/refresh each, unregister any that
+ * disappeared, and reload affected tabs so changes show immediately.
+ */
+const applyMods = async (message: ApplyModsMessage): Promise<RuntimeResult<ApplyModsResult>> => {
+  const userScripts = getUserScriptsApi();
+  if (!userScripts) {
+    return { ok: false, error: userScriptsUnavailableError };
+  }
+
+  const bundles = (message.bundles || []).filter((bundle) => bundle.mod_id);
+  const keepIds = new Set(bundles.map((bundle) => modScriptId(bundle.mod_id as string)));
+
+  let applied = 0;
+  const matchesToReload = new Set<string>();
+  try {
+    for (const bundle of bundles) {
+      if (await registerMod(userScripts, bundle)) {
+        applied += 1;
+        bundle.matches.forEach((pattern) => matchesToReload.add(pattern));
+      }
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+
+  const removed = await unregisterStaleMods(userScripts, keepIds);
+  const reloaded = await reloadMatchingTabs([...matchesToReload]);
+  return { ok: true, data: { applied, removed, reloaded } };
+};
+
+/** Remove a single mod's user script (the backend deletes its files separately). */
+const removeMod = async (message: RemoveModMessage): Promise<RuntimeResult<{ removed: boolean }>> => {
+  const userScripts = getUserScriptsApi();
+  if (!userScripts) {
+    return { ok: false, error: userScriptsUnavailableError };
+  }
+  const scriptId = modScriptId(message.modId);
+  let reloadMatches: string[] = [];
+  try {
+    const existing = await userScripts.getScripts({ ids: [scriptId] });
+    const found = existing.find((script) => script.id === scriptId) as
+      | { matches?: string[] }
+      | undefined;
+    reloadMatches = found?.matches || [];
+    if (existing.length > 0) {
+      await userScripts.unregister({ ids: [scriptId] });
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  await reloadMatchingTabs(reloadMatches);
+  return { ok: true, data: { removed: true } };
+};
 
 const initSentry = () => {
   if (!CONJURE_CONFIG.sentry.enabled) return;
@@ -138,6 +299,10 @@ const handleRuntimeMessage = async (
       return getActiveTabs();
     case BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE:
       return reloadAllTabsOnce();
+    case BACKGROUND_MESSAGE.APPLY_MODS:
+      return applyMods(message as ApplyModsMessage);
+    case BACKGROUND_MESSAGE.REMOVE_MOD:
+      return removeMod(message as RemoveModMessage);
     default:
       return { ok: false, error: "Unsupported runtime message." };
   }

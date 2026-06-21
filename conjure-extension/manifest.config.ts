@@ -23,6 +23,6 @@ export default defineManifest((env) => ({
       run_at: "document_start"
     }
   ],
-  permissions: ["sidePanel", "storage", "tabs", "scripting"],
+  permissions: ["sidePanel", "storage", "tabs", "scripting", "userScripts"],
   host_permissions: ["<all_urls>"]
 }));

@@ -41,6 +41,7 @@ class Settings:
     browser_request_timeout_seconds: int = 30
     max_read_lines: int = 250
     grep_max_matches: int = 50
+    max_agent_iterations: int = 25
 
     @property
     def effective_demo_mode(self) -> bool:
@@ -60,4 +61,5 @@ def load_settings() -> Settings:
         browser_request_timeout_seconds=_env_int("CONJURE_BROWSER_REQUEST_TIMEOUT_SECONDS", 30),
         max_read_lines=_env_int("CONJURE_MAX_READ_LINES", 250),
         grep_max_matches=_env_int("CONJURE_GREP_MAX_MATCHES", 50),
+        max_agent_iterations=_env_int("CONJURE_MAX_AGENT_ITERATIONS", 25),
     )

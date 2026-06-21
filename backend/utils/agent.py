@@ -5,6 +5,7 @@ import json
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
+from . import mods as mods_registry
 from .config import Settings, load_settings
 from .prompts import build_system_prompt
 from .tools import (
@@ -56,14 +57,19 @@ class ConjureAgent:
         pending_tab_requests: dict[str, asyncio.Future[Any]],
         rules: Sequence[str] | None = None,
         history: Sequence[Mapping[str, Any]] | None = None,
+        active_mod_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         project_dir = project_dir_for(self.settings, project_id)
+        active_mod_dir = (
+            mods_registry.mod_dir(project_dir, active_mod_id) if active_mod_id else None
+        )
         outbound: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         tokens = set_tool_context(
             outbound_queue=outbound,
             pending_tab_requests=pending_tab_requests,
             project_dir=project_dir,
             settings=self.settings,
+            active_mod_dir=active_mod_dir,
         )
         try:
             if self.settings.effective_demo_mode:
@@ -82,6 +88,8 @@ class ConjureAgent:
                 rules=rules or [],
                 history=history or [],
                 outbound=outbound,
+                mods=mods_registry.list_mods(project_dir),
+                editing_mod_id=active_mod_id,
             ):
                 yield event
         finally:
@@ -129,6 +137,8 @@ class ConjureAgent:
         rules: Sequence[str],
         history: Sequence[Mapping[str, Any]],
         outbound: asyncio.Queue[dict[str, Any]],
+        mods: Sequence[Mapping[str, Any]] | None = None,
+        editing_mod_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         try:
             from langchain.chat_models import init_chat_model
@@ -154,6 +164,8 @@ class ConjureAgent:
                     project_id=project_id,
                     active_tabs=active_tabs,
                     rules=rules,
+                    mods=mods,
+                    editing_mod_id=editing_mod_id,
                 )
             )
         ]
@@ -168,7 +180,7 @@ class ConjureAgent:
                 messages.append(HumanMessage(content=text))
         messages.append(HumanMessage(content=query))
 
-        for _ in range(8):
+        for _ in range(self.settings.max_agent_iterations):
             full = None
             async for chunk in model.astream(messages):
                 full = chunk if full is None else full + chunk
