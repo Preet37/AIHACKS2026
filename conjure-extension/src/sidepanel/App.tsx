@@ -7,7 +7,6 @@ import {
   Loader2,
   MessageSquareText,
   Mic,
-  MicOff,
   Pencil,
   Puzzle,
   RefreshCcw,
@@ -19,6 +18,7 @@ import {
   XCircle
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { VoiceOverlay } from "./VoiceOverlay";
 import { useVoice } from "./useVoice";
 import {
   createConversationWsUrl,
@@ -264,7 +264,7 @@ export default function App() {
     voiceInitiatedRef.current = true;
     void submitChatRef.current?.(text);
   }, []);
-  const { voiceState, voiceError, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
+  const { voiceState, voiceError, amplitude, permissionState, requestPermission, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
 
   const addSystemMessage = useCallback((content: string) => {
     setMessages((current) => [
@@ -871,34 +871,13 @@ export default function App() {
         </div>
       </header>
 
-      {voiceState !== "idle" || voiceError ? (
-        <div className={`voice-bar voice-bar--${voiceError ? "error" : voiceState}`} aria-live="polite">
-          {voiceState === "listening" && (
-            <>
-              <Mic aria-hidden="true" className="voice-icon pulse" />
-              <span>Listening… release Alt to send</span>
-            </>
-          )}
-          {voiceState === "transcribing" && (
-            <>
-              <Loader2 aria-hidden="true" className="spin voice-icon" />
-              <span>Transcribing…</span>
-            </>
-          )}
-          {voiceState === "speaking" && (
-            <>
-              <Volume2 aria-hidden="true" className="voice-icon pulse" />
-              <span>Speaking…</span>
-            </>
-          )}
-          {voiceError && (
-            <>
-              <MicOff aria-hidden="true" className="voice-icon" />
-              <span>{voiceError}</span>
-            </>
-          )}
-        </div>
-      ) : null}
+      <VoiceOverlay
+        voiceState={voiceState}
+        voiceError={voiceError}
+        amplitude={amplitude}
+        permissionState={permissionState}
+        onRequestPermission={requestPermission}
+      />
 
       <section className="project-row" aria-label="Project">
         <label htmlFor="projectId">Project</label>
@@ -1139,19 +1118,12 @@ export default function App() {
         <div className="composer-actions">
           <button
             type="button"
-            title={
-              voiceState === "listening"
-                ? "Release Alt to send"
-                : voiceState === "transcribing"
-                  ? "Transcribing…"
-                  : "Hold Alt / Option to speak"
-            }
-            className={`mic-button icon-button ${voiceState !== "idle" ? "mic-active" : ""}`}
-            aria-pressed={voiceState === "listening"}
+            title="Hold Alt/Option to speak · double-tap to lock"
+            className={`mic-button icon-button${voiceState !== "idle" ? " mic-active" : ""}${voiceState === "locked" ? " mic-locked" : ""}`}
+            aria-label="Voice input"
+            tabIndex={-1}
           >
-            {voiceState === "listening" ? (
-              <Mic aria-hidden="true" className="pulse" />
-            ) : voiceState === "transcribing" ? (
+            {voiceState === "transcribing" ? (
               <Loader2 aria-hidden="true" className="spin" />
             ) : voiceState === "speaking" ? (
               <Volume2 aria-hidden="true" />

@@ -618,48 +618,169 @@ h2 {
   margin-bottom: 8px;
 }
 
-/* ── Voice bar ─────────────────────────────────────────── */
+/* ── Voice overlay (Wispr-style) ────────────────────────── */
 
-.voice-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-size: 13px;
+.voice-overlay {
+  position: relative;
+  margin: 0 10px 2px;
+  border-radius: 14px;
+  padding: 10px 14px 8px;
+  font-size: 12px;
   font-weight: 500;
-  margin: 0 10px;
-  transition: background 0.2s;
+  overflow: hidden;
+  animation: vo-enter 0.18s ease;
 }
 
-.voice-bar--listening {
+@keyframes vo-enter {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Listening state */
+.voice-overlay--listening {
   background: #e8f5e9;
-  color: #245a4b;
+  color: #1b5e20;
   border: 1px solid #a5d6a7;
 }
 
-.voice-bar--transcribing {
+/* Locked state */
+.voice-overlay--locked {
   background: #e3f2fd;
-  color: #1565c0;
+  color: #0d47a1;
   border: 1px solid #90caf9;
 }
 
-.voice-bar--speaking {
+/* Transcribing */
+.voice-overlay--transcribing {
+  background: #fff8e1;
+  color: #e65100;
+  border: 1px solid #ffcc80;
+}
+
+/* Speaking */
+.voice-overlay--speaking {
   background: #fce4ec;
   color: #880e4f;
   border: 1px solid #f48fb1;
 }
 
-.voice-bar--error {
+/* Error / permission denied */
+.voice-overlay--error {
   background: #fcecea;
   color: #9d2f27;
   border: 1px solid #f0c8c4;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.voice-icon {
-  width: 16px;
-  height: 16px;
+.vo-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 6px;
+}
+
+.vo-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.08);
   flex: 0 0 auto;
+}
+
+.vo-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.voice-overlay--error .vo-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.vo-label {
+  flex: 1;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+}
+
+.vo-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: 100px;
+  background: rgba(13, 71, 161, 0.15);
+  color: #0d47a1;
+}
+
+.vo-hint {
+  font-size: 10px;
+  opacity: 0.7;
+  display: block;
+  margin-top: 2px;
+  margin-left: 29px;
+}
+
+.vo-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  font-size: 12px;
+}
+
+.vo-text strong {
+  font-weight: 700;
+}
+
+.vo-text span {
+  opacity: 0.85;
+  font-size: 11px;
+}
+
+.vo-fix-btn {
+  background: #9d2f27;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.vo-fix-btn:hover {
+  opacity: 0.85;
+}
+
+/* ── Waveform bars ──────────────────────────────────────── */
+
+.waveform {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 28px;
+  margin: 0 0 4px 28px;
+}
+
+.waveform-bar {
+  display: block;
+  width: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.75;
+  height: var(--bar-h, 8%);
+  transition: height 60ms ease;
 }
 
 /* ── Mic button in composer ─────────────────────────────── */
@@ -677,24 +798,26 @@ h2 {
   border: 1px solid #c7d6cd;
   border-radius: 8px;
   color: #48574e;
-  cursor: pointer;
+  cursor: default;
   display: grid;
   place-items: center;
   width: 36px;
   height: 36px;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-
-.mic-button:hover {
-  border-color: #4b8c75;
-  background: #edf8f0;
-  color: #245a4b;
+  user-select: none;
 }
 
 .mic-button.mic-active {
-  background: #245a4b;
-  border-color: #245a4b;
+  background: #1b5e20;
+  border-color: #1b5e20;
   color: #fff;
+}
+
+.mic-button.mic-locked {
+  background: #0d47a1;
+  border-color: #0d47a1;
+  color: #fff;
+  box-shadow: 0 0 0 3px rgba(13, 71, 161, 0.25);
 }
 
 .mic-button svg {
@@ -702,13 +825,3 @@ h2 {
   height: 16px;
 }
 
-/* ── Pulse animation for active voice states ────────────── */
-
-@keyframes voice-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%       { opacity: 0.6; transform: scale(1.15); }
-}
-
-.pulse {
-  animation: voice-pulse 1s ease-in-out infinite;
-}
