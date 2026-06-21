@@ -71,8 +71,6 @@ interface ToolRun {
 // Workspace blocks for the StatusBar — the [n] index is added by the primitive.
 const panelModes: Array<{ id: string; label: string }> = [
   { id: "home", label: "home" },
-  { id: "design", label: "design" },
-  { id: "trace", label: "track" },
   { id: "settings", label: "settings" }
 ];
 
@@ -284,7 +282,7 @@ export default function App() {
     allowAuthenticatedTabs: false,
     requireConfirmation: true,
     voiceAlwaysListening: false,
-    workMode: "planning"
+    workMode: "direct"
   });
   const [commandShortcuts, setCommandShortcuts] = useState<CommandShortcutInfo[]>([]);
   const [fallbackHotkey, setFallbackHotkeyState] = useState(DEFAULT_FALLBACK_HOTKEY);
@@ -299,6 +297,7 @@ export default function App() {
   const submitChatRef = useRef<((query: string) => Promise<void>) | null>(null);
 
   const handleVoiceTranscript = useCallback((text: string) => {
+    // Voice always sends directly to the backend — never enters planning UI
     void submitChatRef.current?.(text);
   }, []);
   const { voiceState, voiceError, barAmplitudes, activateMic, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
@@ -803,7 +802,6 @@ export default function App() {
             modId: readString(raw, "mod_id", "modId"),
             targetUrl: readString(raw, "target_url", "targetUrl")
           });
-          void openTraceTab();
           setStatusText("Sandbox running");
           return;
         case SERVER_EVENT.SANDBOX_SCREENSHOT:
@@ -1008,14 +1006,6 @@ export default function App() {
     const query = input.trim();
     if (!query) return;
     setInput("");
-    if (uiSettings.workMode === "planning") {
-      setMode("planning");
-      setMessages((current) => [
-        ...current,
-        { id: makeId(), role: "user", content: query, createdAt: Date.now() }
-      ]);
-      return;
-    }
     await submitChat(query);
   };
 
@@ -1023,14 +1013,6 @@ export default function App() {
     const command = query.trim();
     if (!command) return;
     setInput("");
-    if (uiSettings.workMode === "planning") {
-      setMode("planning");
-      setMessages((current) => [
-        ...current,
-        { id: makeId(), role: "user", content: command, createdAt: Date.now() }
-      ]);
-      return;
-    }
     await submitChat(command);
   };
 
@@ -1202,12 +1184,12 @@ export default function App() {
     .filter((url): url is string => Boolean(url));
 
   const providerLabel =
-    agentRun.provider === "claude"
-      ? "Claude"
-      : agentRun.provider === "nemotron"
-        ? "Nemotron"
-        : agentRun.provider === "devin"
-          ? "Devin"
+    agentRun.provider === "groq"
+      ? "Groq"
+      : agentRun.provider === "claude"
+        ? "Claude"
+        : agentRun.provider === "nemotron"
+          ? "Nemotron"
           : "Agent";
 
   const activeMods = useMemo(() => mods.filter((mod) => mod.status === "active"), [mods]);

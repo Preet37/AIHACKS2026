@@ -204,36 +204,6 @@ class StoreTests(unittest.TestCase):
 
         run(scenario())
 
-    def test_in_memory_store_round_trips_devin_session_mapping(self):
-        async def scenario():
-            store = InMemoryStore(now=MutableClock(3500))
-
-            await store.set_devin_session(
-                "conversation-1",
-                project_id="project-1",
-                devin_session_id="devin-123",
-                devin_url="https://app.devin.ai/sessions/devin-123",
-                status="running",
-                status_detail="working",
-                pull_requests=[{"url": "https://github.com/example/repo/pull/1"}],
-            )
-
-            self.assertEqual(
-                await store.get_devin_session("conversation-1"),
-                {
-                    "conversation_id": "conversation-1",
-                    "project_id": "project-1",
-                    "devin_session_id": "devin-123",
-                    "devin_url": "https://app.devin.ai/sessions/devin-123",
-                    "status": "running",
-                    "status_detail": "working",
-                    "pull_requests": [{"url": "https://github.com/example/repo/pull/1"}],
-                    "last_message_cursor": "",
-                    "updated_at": 3500,
-                },
-            )
-
-        run(scenario())
 
     def test_redis_store_uses_design_doc_keys_and_ttl(self):
         async def scenario():
@@ -302,40 +272,6 @@ class StoreTests(unittest.TestCase):
 
         run(scenario())
 
-    def test_redis_store_round_trips_devin_session_mapping(self):
-        async def scenario():
-            redis = FakeRedis()
-            store = RedisStore(redis, now=MutableClock(4500))
-
-            await store.set_devin_session(
-                "conversation-1",
-                project_id="project-1",
-                devin_session_id="devin-123",
-                devin_url="https://app.devin.ai/sessions/devin-123",
-                status="exit",
-                status_detail="finished",
-                pull_requests=[{"url": "https://github.com/example/repo/pull/1"}],
-                last_message_cursor="cursor-1",
-            )
-
-            self.assertEqual(redis.strings["conversation:conversation-1:devin_session"], "devin-123")
-            self.assertEqual(redis.hashes["devin:session:conversation-1"]["status"], "exit")
-            self.assertEqual(
-                await store.get_devin_session("conversation-1"),
-                {
-                    "conversation_id": "conversation-1",
-                    "project_id": "project-1",
-                    "devin_session_id": "devin-123",
-                    "devin_url": "https://app.devin.ai/sessions/devin-123",
-                    "status": "exit",
-                    "status_detail": "finished",
-                    "pull_requests": [{"url": "https://github.com/example/repo/pull/1"}],
-                    "last_message_cursor": "cursor-1",
-                    "updated_at": 4500,
-                },
-            )
-
-        run(scenario())
 
     def test_create_store_falls_back_when_redis_is_unavailable(self):
         async def scenario():

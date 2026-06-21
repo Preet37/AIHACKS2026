@@ -11,7 +11,6 @@ export function SettingsPanel() {
   const {
     uiSettings,
     toggleUiSetting,
-    setUiSettings,
     projectId,
     setProjectId,
     connectionState,
@@ -29,12 +28,6 @@ export function SettingsPanel() {
     { key: "linkedin" as const, label: "LinkedIn" },
     { key: "gmail" as const, label: "Gmail" },
     { key: "calendar" as const, label: "Calendar" }
-  ];
-
-  const permissions = [
-    { key: "allowAuthenticatedTabs" as const, label: "Allow agents to act in authenticated tabs" },
-    { key: "requireConfirmation" as const, label: "Require confirmation before each run" },
-    { key: "voiceAlwaysListening" as const, label: "Voice always-listening" }
   ];
   const commandShortcut = commandShortcuts.find((command) => command.name === "toggle-command-bar");
   const commandState = commandShortcut?.shortcut ? "active" : commandShortcut ? "pending" : "pending";
@@ -71,21 +64,7 @@ export function SettingsPanel() {
         </div>
       </Pane>
 
-      {/* PERMISSIONS ─────────────────────────────────────────────────────── */}
-      <Pane name="PERMISSIONS" surface ariaLabel="Permissions">
-        <div className="sp-pane-body">
-          {permissions.map(({ key, label }) => (
-            <div key={key} className="sp-row">
-              <span className="sp-row-label">{label}</span>
-              <Toggle
-                checked={Boolean(uiSettings[key])}
-                onChange={() => toggleUiSetting(key)}
-                label={`Toggle ${label}`}
-              />
-            </div>
-          ))}
-        </div>
-      </Pane>
+      {/* PERMISSIONS removed — always enabled */}
 
       {/* project ─────────────────────────────────────────────────────────── */}
       <Pane
@@ -139,36 +118,7 @@ export function SettingsPanel() {
         </div>
       </Pane>
 
-      {/* MODE ────────────────────────────────────────────────────────────── */}
-      <Pane
-        name="MODE"
-        surface
-        ariaLabel="Work mode"
-        headerRight={
-          <span className="sp-header-mode">{uiSettings.workMode}</span>
-        }
-      >
-        <div className="sp-pane-body">
-          <div className="sp-segment" role="group" aria-label="Work mode">
-            <button
-              type="button"
-              className={`sp-seg-btn${uiSettings.workMode === "planning" ? " sp-seg-btn--active" : ""}`}
-              aria-pressed={uiSettings.workMode === "planning"}
-              onClick={() => setUiSettings((current) => ({ ...current, workMode: "planning" }))}
-            >
-              planning
-            </button>
-            <button
-              type="button"
-              className={`sp-seg-btn${uiSettings.workMode === "coding" ? " sp-seg-btn--active" : ""}`}
-              aria-pressed={uiSettings.workMode === "coding"}
-              onClick={() => setUiSettings((current) => ({ ...current, workMode: "coding" }))}
-            >
-              coding
-            </button>
-          </div>
-        </div>
-      </Pane>
+      {/* MODE removed — agent auto-decides based on user intent */}
 
       <Pane
         name="KEYBIND"

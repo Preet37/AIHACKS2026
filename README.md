@@ -25,8 +25,8 @@ Fill in real values for the selected coding provider, Redis, Browserbase, Simula
 
 Required config groups:
 
-- Agent provider: `CONJURE_AGENT_PROVIDER=devin` for Devin cloud sessions, `CONJURE_AGENT_PROVIDER=claude` for the Claude local tool loop, or `CONJURE_AGENT_PROVIDER=nemotron` for the NVIDIA Nemotron local tool loop
-- Devin: `DEVIN_API_KEY`, `DEVIN_ORG_ID`, API base URL, agent mode, repositories, branch, and polling settings
+- Agent provider: `CONJURE_AGENT_PROVIDER=groq` (default, fastest), `CONJURE_AGENT_PROVIDER=claude` for Claude, or `CONJURE_AGENT_PROVIDER=nemotron` for NVIDIA Nemotron
+- Groq: `GROQ_API_KEY` and `GROQ_MODEL` (default qwen/qwen3-32b)
 - Claude: `ANTHROPIC_API_KEY` and `CONJURE_ANTHROPIC_MODEL`
 - Nemotron: `NVIDIA_API_KEY`, `NVIDIA_MODEL`, and optional `NVIDIA_API_BASE_URL` for self-hosted NIM
 - Redis: `REDIS_URL`, `REDIS_NAMESPACE`, sandbox cache TTL
@@ -62,7 +62,7 @@ npm --prefix conjure-extension install
 npm run dev:extension
 ```
 
-For manual Chrome testing, build the extension and load the unpacked output directory from Chrome's Extensions page. Keep Devin, Claude, Nemotron, and other provider keys server-side; the extension should use `VITE_BACKEND_URL` and `VITE_BACKEND_WS_URL` only.
+For manual Chrome testing, build the extension and load the unpacked output directory from Chrome's Extensions page. Keep Groq, Claude, Nemotron, and other provider keys server-side; the extension should use `VITE_BACKEND_URL` and `VITE_BACKEND_WS_URL` only.
 
 ## Dev Commands
 
@@ -95,7 +95,7 @@ When backend and extension implementations arrive, add focused tests under `test
 
 ## Integration Notes
 
-- Redis should hold projects, conversations, memory rules, Devin session mappings, sandbox result cache entries, and sandbox job streams.
+- Redis should hold projects, conversations, memory rules, sandbox result cache entries, and sandbox job streams.
 - Browserbase owns disposable Chrome sessions and replay/screenshot capture.
 - Simular owns autonomous functional, crash, and security passes against the Browserbase session.
 - Sentry should use separate environments or projects for backend, extension, and sandbox crashes.

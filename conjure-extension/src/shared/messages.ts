@@ -503,7 +503,7 @@ export interface AgentPullRequest {
   title?: string;
 }
 
-export type AgentProvider = "devin" | "claude" | "nemotron";
+export type AgentProvider = "groq" | "claude" | "nemotron";
 
 export type ServerToClientEvent =
   | { type: typeof SERVER_EVENT.CONVERSATION_ID; conversation_id: string }

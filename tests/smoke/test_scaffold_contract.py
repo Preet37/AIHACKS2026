@@ -19,11 +19,8 @@ class ScaffoldContractTests(unittest.TestCase):
         env_example = self.read_root_file(".env.example")
         required_names = [
             "CONJURE_AGENT_PROVIDER",
-            "DEVIN_API_KEY",
-            "DEVIN_ORG_ID",
-            "DEVIN_API_BASE_URL",
-            "DEVIN_MODE",
-            "DEVIN_REPOS",
+            "GROQ_API_KEY",
+            "GROQ_MODEL",
             "ANTHROPIC_API_KEY",
             "CONJURE_ANTHROPIC_MODEL",
             "NVIDIA_API_KEY",
@@ -84,7 +81,7 @@ class ScaffoldContractTests(unittest.TestCase):
             "extension setup",
             "dev commands",
             "test commands",
-            "devin",
+            "groq",
             "nemotron",
             "browserbase",
             "simular",

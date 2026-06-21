@@ -142,6 +142,18 @@ def _resolve_path(relative_path: str | None = None) -> Path:
     if requested.is_absolute():
         raise ValueError("Tool paths must be relative to the project workspace")
 
+    # Strip leading mod-id prefix that Groq sometimes adds redundantly.
+    # e.g. the model writes "d6ccc92ebd5f/manifest.json" when workspace is
+    # already mods/d6ccc92ebd5f — just use "manifest.json".
+    active = _active_mod_dir_var.get()
+    if active is not None:
+        parts = requested.parts
+        if parts and parts[0] == active.name:
+            requested = Path(*parts[1:]) if len(parts) > 1 else Path(".")
+
+    if requested == Path("."):
+        return workspace_dir
+
     resolved = (workspace_dir / requested).resolve()
     if resolved != workspace_dir and workspace_dir not in resolved.parents:
         raise ValueError("Tool path escapes the project workspace")
@@ -446,6 +458,10 @@ async def get_tab_content(tab_id: int, content_type: str = "text") -> str:
     try:
         result = await asyncio.wait_for(future, timeout=_settings().browser_request_timeout_seconds)
         return str(result)
+    except asyncio.TimeoutError:
+        return _json({"error": "Tab content request timed out. The page may not be accessible or the extension lost connection."})
+    except Exception as exc:
+        return _json({"error": f"Failed to get tab content: {exc}"})
     finally:
         pending.pop(request_id, None)
 
@@ -473,6 +489,10 @@ async def get_console_logs(tab_id: int, level: str | None = None, since: str | N
     try:
         result = await asyncio.wait_for(future, timeout=_settings().browser_request_timeout_seconds)
         return str(result)
+    except asyncio.TimeoutError:
+        return _json({"error": "Console logs request timed out."})
+    except Exception as exc:
+        return _json({"error": f"Failed to get console logs: {exc}"})
     finally:
         pending.pop(request_id, None)
 

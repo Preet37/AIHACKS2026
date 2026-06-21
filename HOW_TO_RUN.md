@@ -23,7 +23,7 @@ For a first test without API keys, keep this in `.env`:
 CONJURE_DEMO_MODE=true
 ```
 
-This lets the backend run in demo mode without Devin, Claude, Nemotron, or Browserbase credentials.
+This lets the backend run in demo mode without Groq, Claude, Nemotron, or Browserbase credentials.
 
 ## 2. Install Backend Dependencies
 
@@ -85,23 +85,20 @@ Then in Chrome:
 
 The side panel should open. Type a prompt. In demo mode, the backend should stream simulated progress phrases for the selected provider.
 
-## 7. Test Real Devin Sessions
+## 7. Test Real Groq Sessions (Primary Provider)
 
 Edit `.env`:
 
 ```env
-CONJURE_AGENT_PROVIDER=devin
+CONJURE_AGENT_PROVIDER=groq
 CONJURE_DEMO_MODE=false
-DEVIN_API_KEY=cog_your_key_here
-DEVIN_ORG_ID=org_your_org_id
-DEVIN_MODE=normal
-DEVIN_REPOS=Preet37/AIHACKS2026
-DEVIN_BRANCH=feat/Devin
+GROQ_API_KEY=gsk_your_key_here
+GROQ_MODEL=qwen/qwen3-32b
 ```
 
 Restart the backend after changing `.env`.
 
-Keep Devin and other private keys server-side only. Do not put private keys in any `VITE_*` variable because those are bundled into the Chrome extension.
+Groq runs through the local backend tool loop via its OpenAI-compatible API. It provides the fastest inference (~800 tok/s). Keep API keys server-side only. Do not put private keys in any `VITE_*` variable because those are bundled into the Chrome extension.
 
 ## 8. Test Real Claude Local Tool Loop
 
@@ -139,7 +136,7 @@ NVIDIA_API_BASE_URL=http://localhost:8000/v1
 
 Restart the backend after changing `.env`.
 
-Nemotron runs through the same local backend tool loop as Claude. It can read/write generated project files, run commands, and request browser context through the extension bridge. It does not create Devin cloud sessions.
+Nemotron runs through the same local backend tool loop as Claude and Groq. It can read/write generated project files, run commands, and request browser context through the extension bridge.
 
 ## 10. Enable Full Sandbox Mode
 

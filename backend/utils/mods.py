@@ -585,7 +585,15 @@ def read_bundle(directory: Path) -> dict[str, Any] | None:
     """Read an MV3 content-script bundle (matches + JS + CSS) from a directory."""
     manifest_path = directory / "manifest.json"
     if not manifest_path.is_file():
-        return None
+        # Fallback: some models nest files in a subdirectory named after the mod_id.
+        # Check immediate subdirectories for a manifest.json.
+        for child in directory.iterdir():
+            if child.is_dir() and (child / "manifest.json").is_file():
+                directory = child
+                manifest_path = child / "manifest.json"
+                break
+        else:
+            return None
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
