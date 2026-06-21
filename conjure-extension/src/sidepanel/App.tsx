@@ -1,19 +1,4 @@
 import * as Sentry from "@sentry/browser";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Circle,
-  ExternalLink,
-  Loader2,
-  MessageSquareText,
-  Pencil,
-  Puzzle,
-  RefreshCcw,
-  Send,
-  Terminal,
-  Trash2,
-  XCircle
-} from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createConversationWsUrl,
@@ -29,8 +14,6 @@ import {
   SERVER_EVENT,
   type ActiveTabSnapshot,
   type ApplyModsResult,
-  type AgentProvider,
-  type AgentPullRequest,
   type ClientToServerEvent,
   type ConsoleLogEntry,
   type GeneratedBundle,
@@ -41,6 +24,25 @@ import {
   type RuntimeResult,
   type ServerToClientEvent
 } from "../shared/messages";
+import { hostLabel } from "./lib/format";
+import { StatusBar, StatusBlock } from "./components";
+import {
+  SurfaceProvider,
+  type AgentRunState,
+  type ChatMessage,
+  type ConnectionState,
+  type EditingMod,
+  type PanelMode,
+  type PlanningOption,
+  type SurfaceContextValue,
+  type TraceEntry,
+  type TraceStatus,
+  type UiSettings
+} from "./surfaceContext";
+import { LeftStage } from "./surfaces/LeftStage";
+import { RightPanel } from "./surfaces/RightPanel";
+import { Composer } from "./surfaces/Composer";
+import { CommandPalette } from "./surfaces/CommandPalette";
 
 const SESSION_STORAGE_KEY = "conjure.session";
 
@@ -48,17 +50,6 @@ interface PersistedSession {
   projectId: string;
   conversationId?: string;
   messages: ChatMessage[];
-}
-
-type ConnectionState = "idle" | "connecting" | "connected" | "error";
-type ChatRole = "user" | "assistant" | "system";
-
-interface ChatMessage {
-  id: string;
-  role: ChatRole;
-  content: string;
-  createdAt: number;
-  streaming?: boolean;
 }
 
 interface ToolRun {
@@ -70,15 +61,32 @@ interface ToolRun {
   endedAt?: number;
 }
 
-interface AgentRunState {
-  active: boolean;
-  provider?: AgentProvider;
-  phrase: string;
-  status?: string;
-  statusDetail?: string;
-  sessionUrl?: string;
-  pullRequests: AgentPullRequest[];
-}
+// Workspace blocks for the StatusBar — the [n] index is added by the primitive.
+const panelModes: Array<{ id: PanelMode; label: string }> = [
+  { id: "home", label: "home" },
+  { id: "planning", label: "plan" },
+  { id: "design", label: "design" },
+  { id: "trace", label: "trace" },
+  { id: "settings", label: "settings" }
+];
+
+const planningOptions: PlanningOption[] = [
+  {
+    id: "inline",
+    title: "Inline banner at top of page",
+    detail: "Inject a full-width summary block above the site's header."
+  },
+  {
+    id: "side-note",
+    title: "Floating side note",
+    detail: "Anchor a sticky card to the top-right corner."
+  },
+  {
+    id: "panel-only",
+    title: "Only in the Conjure panel",
+    detail: "Pipe the result to the active side-panel view."
+  }
+];
 
 
 const initSentry = () => {
@@ -107,6 +115,17 @@ const captureException = (error: unknown) => {
     Sentry.captureException(error);
   }
 };
+
+const getChromeApi = () => (typeof chrome === "undefined" ? undefined : chrome);
+
+const previewTabSnapshot = (): ActiveTabSnapshot[] => [
+  {
+    id: 0,
+    title: document.title || "Conjure preview",
+    url: location.href,
+    active: true
+  }
+];
 
 const isRuntimeOk = <T,>(result: RuntimeResult<T> | undefined): result is { ok: true; data: T } =>
   Boolean(result?.ok);
@@ -194,12 +213,6 @@ const fallbackElementScript = (selector: string, maxChars: number): PageContentR
   };
 };
 
-const formatTime = (timestamp: number) =>
-  new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(timestamp);
-
 export default function App() {
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const [projectId, setProjectId] = useState(CONJURE_CONFIG.projectId);
@@ -220,10 +233,25 @@ export default function App() {
     pullRequests: []
   });
   const [mods, setMods] = useState<ModRecord[]>([]);
-  const [editingMod, setEditingMod] = useState<{ id: string; prompt: string } | null>(null);
+  const [editingMod, setEditingMod] = useState<EditingMod | null>(null);
   const [tools, setTools] = useState<ToolRun[]>([]);
   const [rules, setRules] = useState<string[]>([]);
   const [statusText, setStatusText] = useState("Ready");
+  const [mode, setMode] = useState<PanelMode>("home");
+  const [showCommand, setShowCommand] = useState(false);
+  const [planningChoice, setPlanningChoice] = useState(planningOptions[0].id);
+  const [planningCustom, setPlanningCustom] = useState("");
+  const [runStartedAt, setRunStartedAt] = useState<number>();
+  const [traceEntries, setTraceEntries] = useState<TraceEntry[]>([]);
+  const [uiSettings, setUiSettings] = useState<UiSettings>({
+    linkedin: true,
+    gmail: true,
+    calendar: false,
+    allowAuthenticatedTabs: false,
+    requireConfirmation: true,
+    voiceAlwaysListening: false,
+    workMode: "planning"
+  });
 
   const socketRef = useRef<WebSocket | null>(null);
   const pendingOpenRef = useRef<Promise<WebSocket> | null>(null);
@@ -243,13 +271,39 @@ export default function App() {
     ]);
   }, []);
 
+  const appendTrace = useCallback((entry: Omit<TraceEntry, "id" | "timestamp">) => {
+    setTraceEntries((current) =>
+      [
+        ...current,
+        {
+          id: makeId(),
+          timestamp: Date.now(),
+          ...entry
+        }
+      ].slice(-80)
+    );
+  }, []);
+
+  const toggleUiSetting = useCallback((key: keyof typeof uiSettings) => {
+    setUiSettings((current) => {
+      const value = current[key];
+      if (typeof value !== "boolean") return current;
+      return { ...current, [key]: !value };
+    });
+  }, []);
+
   // Register/refresh every active mod in the browser via the service worker.
   const applyModBundles = useCallback(
     async (bundles: GeneratedBundle[]) => {
       if (!bundles.length) return;
+      const chromeApi = getChromeApi();
+      if (!chromeApi?.runtime?.sendMessage) {
+        setStatusText("Preview mode");
+        return;
+      }
       setStatusText("Applying mods to browser");
       try {
-        const response = await chrome.runtime.sendMessage({
+        const response = await chromeApi.runtime.sendMessage({
           type: BACKGROUND_MESSAGE.APPLY_MODS,
           bundles
         });
@@ -305,7 +359,10 @@ export default function App() {
         }
         const data = (await response.json()) as { mods?: ModRecord[] };
         setMods(data.mods || []);
-        await chrome.runtime.sendMessage({ type: BACKGROUND_MESSAGE.REMOVE_MOD, modId: mod.id });
+        const chromeApi = getChromeApi();
+        if (chromeApi?.runtime?.sendMessage) {
+          await chromeApi.runtime.sendMessage({ type: BACKGROUND_MESSAGE.REMOVE_MOD, modId: mod.id });
+        }
         setStatusText(`Removed "${mod.name}"`);
         addSystemMessage(`Removed mod "${mod.name}".`);
       } catch (error) {
@@ -365,7 +422,14 @@ export default function App() {
   }, []);
 
   const getActiveTabs = useCallback(async () => {
-    const response = await chrome.runtime.sendMessage({
+    const chromeApi = getChromeApi();
+    if (!chromeApi?.runtime?.sendMessage) {
+      const previewTabs = previewTabSnapshot();
+      setActiveTabs(previewTabs);
+      return previewTabs;
+    }
+
+    const response = await chromeApi.runtime.sendMessage({
       type: BACKGROUND_MESSAGE.GET_ACTIVE_TABS
     });
 
@@ -401,9 +465,14 @@ export default function App() {
 
   const getPageContentFromTab = useCallback(
     async (tabId: number, requestId: string, includeHtml: boolean, selector?: string) => {
+      const chromeApi = getChromeApi();
+      if (!chromeApi?.tabs || !chromeApi?.scripting) {
+        throw new Error("Chrome extension tab APIs are not available in preview mode.");
+      }
+
       try {
         if (selector) {
-          const response = await chrome.tabs.sendMessage(tabId, {
+          const response = await chromeApi.tabs.sendMessage(tabId, {
             type: CONTENT_MESSAGE.GET_ELEMENT_HTML,
             requestId,
             selector,
@@ -414,7 +483,7 @@ export default function App() {
           throw new Error(response?.error || "Content script could not read the selected element.");
         }
 
-        const response = await chrome.tabs.sendMessage(tabId, {
+        const response = await chromeApi.tabs.sendMessage(tabId, {
           type: CONTENT_MESSAGE.GET_PAGE_CONTENT,
           requestId,
           includeHtml,
@@ -425,12 +494,12 @@ export default function App() {
         throw new Error(response?.error || "Content script could not read the page.");
       } catch {
         const [{ result }] = selector
-          ? await chrome.scripting.executeScript({
+          ? await chromeApi.scripting.executeScript({
               target: { tabId },
               func: fallbackElementScript,
               args: [selector, CONJURE_CONFIG.pageContentMaxChars]
             })
-          : await chrome.scripting.executeScript({
+          : await chromeApi.scripting.executeScript({
               target: { tabId },
               func: fallbackPageScript,
               args: [includeHtml, CONJURE_CONFIG.pageContentMaxChars]
@@ -473,7 +542,13 @@ export default function App() {
       const tabId = readNumber(event, "tab_id", "tabId") || activeTab?.id;
 
       try {
-        const response = await chrome.runtime.sendMessage({
+        const chromeApi = getChromeApi();
+        if (!chromeApi?.runtime?.sendMessage) {
+          sendConsoleLogsResponse(requestId, { error: "Console logs are unavailable in preview mode." });
+          return;
+        }
+
+        const response = await chromeApi.runtime.sendMessage({
           type: BACKGROUND_MESSAGE.GET_CONSOLE_LOGS,
           tabId,
           level: readString(event, "level"),
@@ -519,6 +594,11 @@ export default function App() {
             },
             ...current
           ]);
+          appendTrace({
+            label: `tool: ${event.name}`,
+            detail: event.args ? JSON.stringify(event.args).slice(0, 160) : "started",
+            status: "running"
+          });
           setStatusText(`Running ${event.name}`);
           return;
         case SERVER_EVENT.TOOL_END:
@@ -528,6 +608,11 @@ export default function App() {
             return current.map((tool, toolIndex) =>
               toolIndex === index ? { ...tool, status: "done", endedAt: Date.now() } : tool
             );
+          });
+          appendTrace({
+            label: `tool: ${event.name}`,
+            detail: "completed",
+            status: "done"
           });
           setStatusText("Tool complete");
           return;
@@ -541,6 +626,16 @@ export default function App() {
             sessionUrl: event.session_url,
             pullRequests: event.pull_requests || []
           });
+          appendTrace({
+            label: `${event.provider || "agent"} status`,
+            detail: event.status_detail || event.status || event.phrase,
+            status:
+              event.status === "error" || event.status === "suspended"
+                ? "failed"
+                : event.active
+                  ? "running"
+                  : "done"
+          });
           setStatusText(event.phrase);
           return;
         case SERVER_EVENT.THINKING:
@@ -551,6 +646,49 @@ export default function App() {
           return;
         case SERVER_EVENT.REQUEST_CONSOLE_LOGS:
           void handleRequestConsoleLogs(raw);
+          return;
+        case SERVER_EVENT.SANDBOX_START:
+          appendTrace({
+            label: "sandbox start",
+            detail: readString(raw, "target_url", "targetUrl") || "verification started",
+            status: "running",
+            modId: readString(raw, "mod_id", "modId"),
+            targetUrl: readString(raw, "target_url", "targetUrl")
+          });
+          setMode("trace");
+          setStatusText("Sandbox running");
+          return;
+        case SERVER_EVENT.SANDBOX_SCREENSHOT:
+          appendTrace({
+            label: "sandbox screenshot",
+            detail: "captured verification frame",
+            status: "done",
+            modId: readString(raw, "mod_id", "modId"),
+            screenshotData: readString(raw, "data", "url")
+          });
+          setStatusText("Sandbox screenshot captured");
+          return;
+        case SERVER_EVENT.SANDBOX_RESULT: {
+          const passed = Boolean(raw.passed);
+          appendTrace({
+            label: passed ? "sandbox passed" : "sandbox failed",
+            detail: Array.isArray(raw.findings)
+              ? raw.findings.map(String).join("; ")
+              : readString(raw, "replay_url", "replayUrl") || "verification complete",
+            status: passed ? "done" : "failed",
+            modId: readString(raw, "mod_id", "modId"),
+            replayUrl: readString(raw, "replay_url", "replayUrl")
+          });
+          setStatusText(passed ? "Sandbox passed" : "Sandbox failed");
+          return;
+        }
+        case SERVER_EVENT.SANDBOX_HEALING:
+          appendTrace({
+            label: `sandbox healing ${readNumber(raw, "iteration") || ""}`.trim(),
+            detail: readString(raw, "fix_summary", "fixSummary") || "repair iteration",
+            status: "running"
+          });
+          setStatusText("Healing mod");
           return;
         case SERVER_EVENT.EXTENSION_READY: {
           const bundles = (event as { bundles?: GeneratedBundle[] }).bundles || [];
@@ -570,6 +708,11 @@ export default function App() {
         case SERVER_EVENT.DONE:
           finalizeAssistant(event.content);
           setAgentRun((current) => ({ ...current, active: false }));
+          appendTrace({
+            label: "run complete",
+            detail: event.content ? event.content.slice(0, 180) : "assistant finished",
+            status: "done"
+          });
           setStatusText("Ready");
           return;
         case SERVER_EVENT.ERROR:
@@ -589,6 +732,11 @@ export default function App() {
               createdAt: Date.now()
             }
           ]);
+          appendTrace({
+            label: "run error",
+            detail: event.message,
+            status: "failed"
+          });
           setStatusText("Error");
           return;
         default:
@@ -597,6 +745,7 @@ export default function App() {
     },
     [
       appendAssistantContent,
+      appendTrace,
       applyModBundles,
       finalizeAssistant,
       handleRequestConsoleLogs,
@@ -652,6 +801,20 @@ export default function App() {
   const submitChat = useCallback(
     async (query: string, modId?: string) => {
       currentAssistantIdRef.current = null;
+      const startedAt = Date.now();
+      setRunStartedAt(startedAt);
+      setTraceEntries([
+        {
+          id: makeId(),
+          label: modId ? "rebuild requested" : "run requested",
+          detail: query,
+          status: "running",
+          timestamp: startedAt,
+          modId
+        }
+      ]);
+      setMode("trace");
+      setShowCommand(false);
       setAgentRun({
         active: true,
         phrase: "Starting agent...",
@@ -698,6 +861,22 @@ export default function App() {
     await submitChat(query);
   };
 
+  const handleCommandSubmit = async (query: string) => {
+    const command = query.trim();
+    if (!command) return;
+    setInput("");
+    await submitChat(command);
+  };
+
+  const runPlanningBuild = async () => {
+    const selected = planningOptions.find((option) => option.id === planningChoice);
+    const custom = planningCustom.trim();
+    const query = custom
+      ? `Build this browser customization: ${custom}`
+      : `Build this browser customization with ${selected?.title.toLowerCase() || "the selected planning option"}: ${selected?.detail || ""}`;
+    await submitChat(query);
+  };
+
   const submitModChange = async (event: FormEvent) => {
     event.preventDefault();
     if (!editingMod) return;
@@ -717,7 +896,28 @@ export default function App() {
   // persistence effect below is allowed to write.
   useEffect(() => {
     let cancelled = false;
-    chrome.storage.local
+    const chromeApi = getChromeApi();
+    if (!chromeApi?.storage?.local) {
+      try {
+        const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+        const session = raw ? (JSON.parse(raw) as PersistedSession) : undefined;
+        if (session) {
+          if (session.projectId) setProjectId(session.projectId);
+          if (session.conversationId) setConversationId(session.conversationId);
+          if (Array.isArray(session.messages) && session.messages.length > 0) {
+            setMessages(session.messages.map((message) => ({ ...message, streaming: false })));
+          }
+        }
+      } catch (error) {
+        captureException(error);
+      }
+      hydratedRef.current = true;
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    chromeApi.storage.local
       .get(SESSION_STORAGE_KEY)
       .then((stored) => {
         if (cancelled) return;
@@ -744,14 +944,26 @@ export default function App() {
   useEffect(() => {
     if (!hydratedRef.current) return;
     const session: PersistedSession = { projectId, conversationId, messages };
-    chrome.storage.local.set({ [SESSION_STORAGE_KEY]: session }).catch(captureException);
+    const chromeApi = getChromeApi();
+    if (chromeApi?.storage?.local) {
+      chromeApi.storage.local.set({ [SESSION_STORAGE_KEY]: session }).catch(captureException);
+      return;
+    }
+    try {
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    } catch (error) {
+      captureException(error);
+    }
   }, [projectId, conversationId, messages]);
 
   useEffect(() => {
     void getActiveTabs();
-    chrome.runtime
-      .sendMessage({ type: BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE })
-      .catch(captureException);
+    const chromeApi = getChromeApi();
+    if (chromeApi?.runtime?.sendMessage) {
+      chromeApi.runtime
+        .sendMessage({ type: BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE })
+        .catch(captureException);
+    }
   }, [getActiveTabs]);
 
   // Load the mod list and (re)apply every active mod whenever the project changes.
@@ -763,23 +975,39 @@ export default function App() {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setShowCommand((current) => !current);
+        return;
+      }
+
+      if (event.key === "Escape") {
+        setShowCommand(false);
+        return;
+      }
+
+      if (event.altKey) {
+        const modeIndex = Number(event.key) - 1;
+        const selectedMode = panelModes[modeIndex]?.id;
+        if (selectedMode) {
+          event.preventDefault();
+          setMode(selectedMode);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   useEffect(
     () => () => {
       socketRef.current?.close();
     },
     []
   );
-
-  const statusIcon =
-    connectionState === "connected" ? (
-      <CheckCircle2 aria-hidden="true" />
-    ) : connectionState === "connecting" ? (
-      <Loader2 aria-hidden="true" className="spin" />
-    ) : connectionState === "error" ? (
-      <XCircle aria-hidden="true" />
-    ) : (
-      <Circle aria-hidden="true" />
-    );
 
   const agentStatusClass = agentRun.active
     ? "running"
@@ -802,245 +1030,122 @@ export default function App() {
           ? "Devin"
           : "Agent";
 
+  const activeMods = useMemo(() => mods.filter((mod) => mod.status === "active"), [mods]);
+  const latestUser = useMemo(
+    () => [...messages].reverse().find((message) => message.role === "user"),
+    [messages]
+  );
+  const visibleTrace = traceEntries.length
+    ? traceEntries
+    : [
+        {
+          id: "idle",
+          label: "waiting for command",
+          detail: "No active run yet.",
+          status: "pending" as TraceStatus,
+          timestamp: Date.now()
+        }
+      ];
+  const completedTraceCount = traceEntries.filter((entry) => entry.status === "done").length;
+  const traceProgress = traceEntries.length
+    ? Math.max(8, Math.round((completedTraceCount / Math.max(traceEntries.length, 1)) * 100))
+    : 0;
+  const elapsedLabel = runStartedAt
+    ? `${Math.max(0, Math.round((Date.now() - runStartedAt) / 1000))}s`
+    : "0s";
+  const latestScreenshot = [...traceEntries].reverse().find((entry) => entry.screenshotData);
+  const sandboxImageSrc = latestScreenshot?.screenshotData
+    ? latestScreenshot.screenshotData.startsWith("data:")
+      ? latestScreenshot.screenshotData
+      : `data:image/png;base64,${latestScreenshot.screenshotData}`
+    : undefined;
+  const activeScope = hostLabel(activeTab?.url);
+  const selectedPlanningOption =
+    planningOptions.find((option) => option.id === planningChoice) || planningOptions[0];
+
+  const surfaceValue: SurfaceContextValue = {
+    mode,
+    setMode,
+    mods,
+    activeMods,
+    refreshAndApplyMods,
+    editingMod,
+    setEditingMod,
+    submitModChange,
+    removeMod,
+    agentRun,
+    agentStatusClass,
+    providerLabel,
+    pullRequestLinks,
+    messages,
+    messagesEndRef,
+    latestUser,
+    traceEntries,
+    visibleTrace,
+    completedTraceCount,
+    traceProgress,
+    elapsedLabel,
+    sandboxImageSrc,
+    activeScope,
+    activeTab,
+    activeTabs,
+    refreshTabs,
+    statusText,
+    connectionState,
+    projectId,
+    setProjectId,
+    planningOptions,
+    planningChoice,
+    setPlanningChoice,
+    planningCustom,
+    setPlanningCustom,
+    selectedPlanningOption,
+    runPlanningBuild,
+    uiSettings,
+    toggleUiSetting,
+    setUiSettings,
+    rules,
+    input,
+    setInput,
+    handleSubmit,
+    showCommand,
+    setShowCommand,
+    handleCommandSubmit
+  };
+
+  const connectionStatusState: "active" | "done" | "pending" =
+    connectionState === "connected" ? "active" : connectionState === "idle" ? "done" : "pending";
+
   return (
-    <main className="shell">
-      <header className="topbar">
-        <div className="brand">
-          <div className="brand-mark">
-            <MessageSquareText aria-hidden="true" />
-          </div>
-          <div>
-            <h1>conjure</h1>
-            <p>{statusText}</p>
-          </div>
-        </div>
-        <div className={`connection ${connectionState}`}>
-          {statusIcon}
-          <span>{connectionState}</span>
-        </div>
-      </header>
+    <SurfaceProvider value={surfaceValue}>
+      <main className={`conjure-shell mode-${mode}`}>
+        <LeftStage />
 
-      <section className="project-row" aria-label="Project">
-        <label htmlFor="projectId">Project</label>
-        <input
-          id="projectId"
-          value={projectId}
-          onChange={(event) => setProjectId(event.target.value)}
-          disabled={connectionState === "connected"}
-        />
-        <button type="button" title="Refresh active tabs" onClick={refreshTabs} className="icon-button">
-          <RefreshCcw aria-hidden="true" />
-        </button>
-      </section>
+        <aside className="conjure-panel" aria-label="Conjure command interface">
+          <StatusBar
+            workspaces={panelModes}
+            activeId={mode}
+            onSelect={(id) => setMode(id as PanelMode)}
+            onBrand={() => setShowCommand(true)}
+            right={
+              <>
+                <StatusBlock
+                  state={connectionStatusState}
+                  pulse={connectionState === "connecting"}
+                  label={`Connection: ${connectionState}`}
+                />
+                <span className="cj-statusbar__status">{statusText}</span>
+              </>
+            }
+          />
 
-      <section className="tabs-strip" aria-label="Open tabs">
-        {activeTabs.slice(0, 6).map((tab) => (
-          <button
-            key={tab.id}
-            className={`tab-chip ${tab.active ? "active" : ""}`}
-            title={tab.url}
-            type="button"
-          >
-            <span>{tab.active ? "Active" : "Tab"}</span>
-            <strong>{tab.title}</strong>
-          </button>
-        ))}
-      </section>
+          <RightPanel />
 
-      <section className="chat-log" aria-label="Conversation">
-        {messages.map((message) => (
-          <article key={message.id} className={`message ${message.role}`}>
-            <div className="message-meta">
-              <span>{message.role}</span>
-              <time>{formatTime(message.createdAt)}</time>
-              {message.streaming ? <Loader2 aria-hidden="true" className="spin small" /> : null}
-            </div>
-            <p>{message.content}</p>
-          </article>
-        ))}
-        <div ref={messagesEndRef} />
-      </section>
+          <Composer />
+        </aside>
 
-      <section className="workbench agent-workbench" aria-label="Agent progress">
-        <div className="panel-section agent-panel">
-          <div className="section-title">
-            <Terminal aria-hidden="true" />
-            <h2>{providerLabel}</h2>
-          </div>
-
-          <div className={`status-line ${agentStatusClass}`}>
-            {agentRun.active ? (
-              <Loader2 aria-hidden="true" className="spin" />
-            ) : agentStatusClass === "passed" ? (
-              <CheckCircle2 aria-hidden="true" />
-            ) : agentStatusClass === "failed" ? (
-              <AlertTriangle aria-hidden="true" />
-            ) : (
-              <Circle aria-hidden="true" />
-            )}
-            <span>{agentRun.phrase}</span>
-          </div>
-
-          {agentRun.sessionUrl ? (
-            <a className="replay-link" href={agentRun.sessionUrl} target="_blank" rel="noreferrer">
-              <ExternalLink aria-hidden="true" />
-              Agent session
-            </a>
-          ) : null}
-
-          {pullRequestLinks.length ? (
-            <ol className="agent-links">
-              {pullRequestLinks.map((url, index) => (
-                <li key={url}>
-                  <a href={url} target="_blank" rel="noreferrer">
-                    <ExternalLink aria-hidden="true" />
-                    Pull request {index + 1}
-                  </a>
-                </li>
-              ))}
-            </ol>
-          ) : null}
-        </div>
-
-        <div className="panel-section tools-panel">
-          <div className="section-title">
-            <Terminal aria-hidden="true" />
-            <h2>Tools</h2>
-          </div>
-          {tools.length === 0 ? (
-            <p className="empty">No tool calls yet.</p>
-          ) : (
-            <ol className="tool-list">
-              {tools.slice(0, 5).map((tool) => (
-                <li key={tool.id} className={tool.status}>
-                  <span className="tool-icon">
-                    {tool.status === "running" ? (
-                      <Loader2 aria-hidden="true" className="spin" />
-                    ) : (
-                      <CheckCircle2 aria-hidden="true" />
-                    )}
-                  </span>
-                  <span>
-                    <strong>{tool.name}</strong>
-                    {tool.args ? <code>{JSON.stringify(tool.args).slice(0, 120)}</code> : null}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          )}
-        </div>
-      </section>
-
-      <section className="panel-section mods-panel" aria-label="Mods">
-        <div className="section-title">
-          <Puzzle aria-hidden="true" />
-          <h2>Mods ({mods.length})</h2>
-          <button
-            type="button"
-            title="Refresh and re-apply mods"
-            onClick={() => void refreshAndApplyMods(projectId)}
-            className="icon-button"
-          >
-            <RefreshCcw aria-hidden="true" />
-          </button>
-        </div>
-        {mods.length === 0 ? (
-          <p className="empty">No mods yet. Ask Conjure to build one below.</p>
-        ) : (
-          <ul className="mod-list">
-            {mods.map((mod) => {
-              const verified = mod.last_verified;
-              const verdict = verified?.passed
-                ? "verified"
-                : verified
-                  ? "failed"
-                  : "unverified";
-              return (
-                <li key={mod.id} className={`mod-item ${mod.status}`}>
-                  <div className="mod-head">
-                    <strong>{mod.name}</strong>
-                    <span className={`mod-badge ${verdict}`}>{verdict}</span>
-                  </div>
-                  <p className="mod-prompt">{mod.prompt}</p>
-                  {verified?.replay_url ? (
-                    <a
-                      className="replay-link"
-                      href={verified.replay_url}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <ExternalLink aria-hidden="true" />
-                      Sandbox replay
-                    </a>
-                  ) : null}
-                  {editingMod?.id === mod.id ? (
-                    <form className="mod-edit" onSubmit={submitModChange}>
-                      <textarea
-                        value={editingMod.prompt}
-                        onChange={(event) =>
-                          setEditingMod({ id: mod.id, prompt: event.target.value })
-                        }
-                        rows={2}
-                      />
-                      <div className="mod-edit-actions">
-                        <button type="submit" className="mod-action">
-                          Rebuild
-                        </button>
-                        <button
-                          type="button"
-                          className="mod-action ghost"
-                          onClick={() => setEditingMod(null)}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <div className="mod-actions">
-                      <button
-                        type="button"
-                        className="mod-action"
-                        title="Change the prompt and rebuild this mod"
-                        onClick={() => setEditingMod({ id: mod.id, prompt: mod.prompt })}
-                      >
-                        <Pencil aria-hidden="true" /> Change
-                      </button>
-                      <button
-                        type="button"
-                        className="mod-action danger"
-                        title="Remove this mod"
-                        onClick={() => void removeMod(mod)}
-                      >
-                        <Trash2 aria-hidden="true" /> Remove
-                      </button>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      {rules.length ? (
-        <section className="rules-strip" aria-label="Memory rules">
-          {rules.slice(0, 3).map((rule) => (
-            <span key={rule}>{rule}</span>
-          ))}
-        </section>
-      ) : null}
-
-      <form className="composer" onSubmit={handleSubmit}>
-        <textarea
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          placeholder="Ask conjure to build a browser customization..."
-          rows={3}
-        />
-        <button type="submit" title="Send message" className="send-button" disabled={!input.trim()}>
-          <Send aria-hidden="true" />
-        </button>
-      </form>
-    </main>
+        {showCommand ? <CommandPalette /> : null}
+      </main>
+    </SurfaceProvider>
   );
 }
