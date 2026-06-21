@@ -1,5 +1,7 @@
 import * as Sentry from "@sentry/browser";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import { useVoice } from "./useVoice";
 import {
   createConversationWsUrl,
   createModsBundleUrl,
@@ -259,6 +261,13 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hydratedRef = useRef(false);
   const projectIdRef = useRef(projectId);
+  const streamAccumRef = useRef<string>("");
+  const submitChatRef = useRef<((query: string) => Promise<void>) | null>(null);
+
+  const handleVoiceTranscript = useCallback((text: string) => {
+    void submitChatRef.current?.(text);
+  }, []);
+  const { voiceState, voiceError, activateMic, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
 
   useEffect(() => {
     projectIdRef.current = projectId;
@@ -384,6 +393,7 @@ export default function App() {
   }, []);
 
   const appendAssistantContent = useCallback((chunk: string) => {
+    streamAccumRef.current += chunk;
     setMessages((current) => {
       const assistantId = currentAssistantIdRef.current || makeId();
       currentAssistantIdRef.current = assistantId;
@@ -411,15 +421,44 @@ export default function App() {
   }, []);
 
   const finalizeAssistant = useCallback((content?: string) => {
+    const fullText = content || streamAccumRef.current;
+    streamAccumRef.current = "";
+
     setMessages((current) =>
       current.map((message) =>
         message.id === currentAssistantIdRef.current
-          ? { ...message, content: content || message.content, streaming: false }
+          ? { ...message, content: fullText || message.content, streaming: false }
           : message
       )
     );
     currentAssistantIdRef.current = null;
-  }, []);
+
+    if (!fullText) return;
+
+    // Build concise spoken summary (1-2 sentences, ≤ 160 chars)
+    const forTTS = fullText
+      .replace(/\*\*Plan:\*\*[\s\S]*/, "")
+      .replace(/```[\s\S]*?```/g, "")
+      .replace(/`[^`]+`/g, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/[*_#>]/g, "")
+      .replace(/\n+/g, " ")
+      .trim();
+
+    const sentenceEnd = /[.!?]/g;
+    let spoken = forTTS;
+    let match: RegExpExecArray | null;
+    let count = 0;
+    while ((match = sentenceEnd.exec(forTTS)) !== null) {
+      count++;
+      if (count >= 2) { spoken = forTTS.slice(0, match.index + 1); break; }
+    }
+    spoken = spoken.slice(0, 160).trim();
+    if (spoken) {
+      const endsWithQuestion = /\?\s*$/.test(spoken);
+      void speakText(spoken, { autoListen: endsWithQuestion });
+    }
+  }, [speakText]);
 
   const getActiveTabs = useCallback(async () => {
     const chromeApi = getChromeApi();
@@ -801,6 +840,7 @@ export default function App() {
   const submitChat = useCallback(
     async (query: string, modId?: string) => {
       currentAssistantIdRef.current = null;
+      streamAccumRef.current = "";
       const startedAt = Date.now();
       setRunStartedAt(startedAt);
       setTraceEntries([
@@ -867,6 +907,9 @@ export default function App() {
     setInput("");
     await submitChat(command);
   };
+
+  // Keep ref in sync so voice transcript callback always calls latest submitChat
+  submitChatRef.current = submitChat;
 
   const runPlanningBuild = async () => {
     const selected = planningOptions.find((option) => option.id === planningChoice);
@@ -1110,7 +1153,10 @@ export default function App() {
     handleSubmit,
     showCommand,
     setShowCommand,
-    handleCommandSubmit
+    handleCommandSubmit,
+    voiceState,
+    voiceError,
+    activateMic
   };
 
   const connectionStatusState: "active" | "done" | "pending" =

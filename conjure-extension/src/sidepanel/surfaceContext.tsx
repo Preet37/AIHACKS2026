@@ -127,6 +127,11 @@ export interface SurfaceContextValue {
   showCommand: boolean;
   setShowCommand: (value: boolean) => void;
   handleCommandSubmit: (query: string) => void;
+
+  // voice
+  voiceState: "idle" | "recording" | "transcribing" | "speaking";
+  voiceError: string | null;
+  activateMic: () => void;
 }
 
 const SurfaceContext = createContext<SurfaceContextValue | null>(null);

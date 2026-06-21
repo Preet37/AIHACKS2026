@@ -2,6 +2,7 @@
 // Pane `MODS` → Window `RUNS` → Pane `CONVERSATION`.
 // All status indicators use StatusBlock (■/□); no lucide circle/spinner icons.
 import { ExternalLink, Pencil, RefreshCcw, Trash2 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import { Button, Pane, StatusBlock, Window } from "../components";
 import { formatTime } from "../lib/format";
 import { useSurface } from "../surfaceContext";
@@ -202,7 +203,13 @@ export function HomePanel() {
                   <StatusBlock state="active" pulse label="streaming" />
                 ) : null}
               </div>
-              <p className="hp-msg-content">{message.content}</p>
+              {message.role === "assistant" ? (
+                <div className="hp-msg-content hp-msg-md">
+                  <ReactMarkdown>{message.content}</ReactMarkdown>
+                </div>
+              ) : (
+                <p className="hp-msg-content">{message.content}</p>
+              )}
             </article>
           ))}
           <div ref={messagesEndRef} />

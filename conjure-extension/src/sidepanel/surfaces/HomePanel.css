@@ -202,3 +202,26 @@
   font-size: var(--cj-fs-body);
   line-height: 1.45;
 }
+
+/* Markdown rendering inside assistant messages */
+.hp-msg-md { display: block; }
+.hp-msg-md p { margin: 0 0 0.4em; }
+.hp-msg-md p:last-child { margin-bottom: 0; }
+.hp-msg-md strong { color: var(--cj-text); font-weight: 600; }
+.hp-msg-md em { font-style: italic; }
+.hp-msg-md ul, .hp-msg-md ol { margin: 0.3em 0 0.3em 1.2em; padding: 0; }
+.hp-msg-md li { margin-bottom: 0.2em; }
+.hp-msg-md code {
+  font-family: monospace;
+  font-size: 0.85em;
+  background: color-mix(in srgb, var(--cj-accent) 12%, transparent);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+}
+.hp-msg-md pre { margin: 0.4em 0; overflow-x: auto; }
+.hp-msg-md pre code { background: none; padding: 0; }
+.hp-msg-md h1, .hp-msg-md h2, .hp-msg-md h3 {
+  font-size: var(--cj-fs-body);
+  font-weight: 600;
+  margin: 0.4em 0 0.2em;
+}
