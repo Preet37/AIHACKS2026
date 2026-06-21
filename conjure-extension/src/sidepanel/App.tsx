@@ -1014,30 +1014,32 @@ export default function App() {
       </section>}
 
       <section className={`panel-section mods-panel${modsExpanded ? " expanded" : ""}`} aria-label="Mods">
-        <button
-          type="button"
-          className="mods-header"
-          onClick={() => setModsExpanded((v) => !v)}
-          aria-expanded={modsExpanded}
-        >
-          <Puzzle aria-hidden="true" />
-          <span>Mods{mods.length > 0 ? ` (${mods.length})` : ""}</span>
-          {mods.some((m) => m.last_verified && !m.last_verified.passed) && (
-            <span className="mods-badge mods-badge--warn">needs fix</span>
-          )}
-          {mods.length > 0 && mods.every((m) => m.last_verified?.passed) && (
-            <span className="mods-badge mods-badge--ok">all passing</span>
-          )}
-          <span className="mods-chevron">{modsExpanded ? "▲" : "▼"}</span>
+        <div className="mods-header">
+          <button
+            type="button"
+            className="mods-toggle"
+            onClick={() => setModsExpanded((v) => !v)}
+            aria-expanded={modsExpanded}
+          >
+            <Puzzle aria-hidden="true" />
+            <span>Mods{mods.length > 0 ? ` (${mods.length})` : ""}</span>
+            {mods.some((m) => m.last_verified && !m.last_verified.passed) && (
+              <span className="mods-badge mods-badge--warn">needs fix</span>
+            )}
+            {mods.length > 0 && mods.every((m) => m.last_verified?.passed) && (
+              <span className="mods-badge mods-badge--ok">all passing</span>
+            )}
+            <span className="mods-chevron">{modsExpanded ? "▲" : "▼"}</span>
+          </button>
           <button
             type="button"
             title="Refresh and re-apply mods"
-            onClick={(e) => { e.stopPropagation(); void refreshAndApplyMods(projectId); }}
+            onClick={() => void refreshAndApplyMods(projectId)}
             className="icon-button mods-refresh"
           >
             <RefreshCcw aria-hidden="true" />
           </button>
-        </button>
+        </div>
         {modsExpanded && (mods.length === 0 ? (
           <p className="empty">No mods yet. Ask Conjure to build one below.</p>
         ) : (

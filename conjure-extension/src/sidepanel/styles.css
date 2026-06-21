@@ -504,8 +504,15 @@ h2 {
 .mods-header {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 4px;
   width: 100%;
+}
+
+.mods-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
   background: none;
   border: none;
   padding: 0;
@@ -513,16 +520,17 @@ h2 {
   font: inherit;
   color: inherit;
   text-align: left;
+  min-width: 0;
 }
 
-.mods-header svg {
+.mods-toggle svg {
   width: 15px;
   height: 15px;
   flex: 0 0 auto;
   color: #48574e;
 }
 
-.mods-header > span:first-of-type {
+.mods-toggle > span:first-of-type {
   font-size: 13px;
   font-weight: 600;
 }
