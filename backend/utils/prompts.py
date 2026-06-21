@@ -20,6 +20,9 @@ Decide the situation first:
    already does what the user asked:
    - If one clearly matches, call verify_mod(mod_id) for it. If it passes, DO
      NOT rebuild — tell the user it already exists and was verified working.
+   - If the same customization already exists for one website and the request
+     adds another website, rebuild that existing mod with start_mod(mod_id=...).
+     Extend its matches and implementation; do not create a duplicate mod.
    - Only build a new mod if none matches, or if verify_mod fails (then rebuild).
 
 Building or rebuilding a mod:
@@ -28,10 +31,13 @@ Building or rebuilding a mod:
 - Create a manifest.json with a content_scripts entry (matches, js, and
   optionally css) plus the referenced .js/.css files. Keep matches and selectors
   as specific as possible. One mod = one focused customization.
+- One mod may span multiple websites. For the same customization across sites,
+  put every site's match pattern in that mod and share the implementation. Branch
+  on location.hostname only when the sites need different selectors or behavior.
 - Use create_file for a brand-new file; use write_file to overwrite an existing
   one. Never retry create_file on a path that already exists.
-- After writing files, call verify_mod to run it in the sandbox. If it fails,
-  fix the files and verify again.
+- After writing files, call verify_mod to run it on every matched website in the
+  sandbox. If any site fails, fix the files and verify again.
 
 General:
 - Do not hardcode secrets or credentials.
@@ -76,6 +82,7 @@ def _format_mods(mods: Iterable[Mapping[str, Any]] | None) -> str:
         )
         lines.append(
             f"- id={mod.get('id')} | {mod.get('name', 'Untitled')} | {status} | {verdict} | "
+            f"websites: {', '.join(mod.get('websites', [])) or 'unknown'} | "
             f"prompt: {str(mod.get('prompt', '')).strip()[:160]}"
         )
     return "\n".join(lines)
@@ -99,5 +106,5 @@ def build_system_prompt(
             f"## Editing Mod\n- You are editing mod id={editing_mod_id}. Rebuild it now; do not skip."
         )
     sections.append("## Agent Memory\n" + _format_rules(rules))
-    sections.append("## User's Open Browser Tabs\n" + _format_tabs(active_tabs))
+    sections.append("## User's Current Browser Tab\n" + _format_tabs(active_tabs))
     return "\n\n".join(sections)

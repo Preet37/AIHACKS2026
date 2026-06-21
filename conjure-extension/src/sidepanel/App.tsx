@@ -257,7 +257,7 @@ export default function App() {
           const { applied, reloaded } = response.data;
           setStatusText(`Applied ${applied} mod(s)`);
           if (reloaded > 0) {
-            addSystemMessage(`Applied ${applied} mod(s) and reloaded ${reloaded} matching tab(s).`);
+            addSystemMessage(`Applied ${applied} mod(s) and reloaded the current tab.`);
           }
           return;
         }
@@ -364,9 +364,9 @@ export default function App() {
     currentAssistantIdRef.current = null;
   }, []);
 
-  const getActiveTabs = useCallback(async () => {
+  const getCurrentTab = useCallback(async () => {
     const response = await chrome.runtime.sendMessage({
-      type: BACKGROUND_MESSAGE.GET_ACTIVE_TABS
+      type: BACKGROUND_MESSAGE.GET_CURRENT_TAB
     });
 
     if (isRuntimeOk<ActiveTabSnapshot[]>(response)) {
@@ -670,7 +670,7 @@ export default function App() {
       ]);
 
       try {
-        const tabs = await getActiveTabs();
+        const tabs = await getCurrentTab();
         const socket = await openSocket();
         socket.send(
           JSON.stringify({
@@ -687,7 +687,7 @@ export default function App() {
         addSystemMessage(error instanceof Error ? error.message : String(error));
       }
     },
-    [addSystemMessage, conversationId, getActiveTabs, openSocket]
+    [addSystemMessage, conversationId, getCurrentTab, openSocket]
   );
 
   const handleSubmit = async (event: FormEvent) => {
@@ -709,7 +709,7 @@ export default function App() {
   };
 
   const refreshTabs = async () => {
-    await getActiveTabs();
+    await getCurrentTab();
   };
 
   // Restore the previous session so closing/reopening the side panel (or a
@@ -748,11 +748,11 @@ export default function App() {
   }, [projectId, conversationId, messages]);
 
   useEffect(() => {
-    void getActiveTabs();
+    void getCurrentTab();
     chrome.runtime
-      .sendMessage({ type: BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE })
+      .sendMessage({ type: BACKGROUND_MESSAGE.RELOAD_CURRENT_TAB_ONCE })
       .catch(captureException);
-  }, [getActiveTabs]);
+  }, [getCurrentTab]);
 
   // Load the mod list and (re)apply every active mod whenever the project changes.
   useEffect(() => {
@@ -828,20 +828,20 @@ export default function App() {
           onChange={(event) => setProjectId(event.target.value)}
           disabled={connectionState === "connected"}
         />
-        <button type="button" title="Refresh active tabs" onClick={refreshTabs} className="icon-button">
+        <button type="button" title="Refresh current tab" onClick={refreshTabs} className="icon-button">
           <RefreshCcw aria-hidden="true" />
         </button>
       </section>
 
-      <section className="tabs-strip" aria-label="Open tabs">
-        {activeTabs.slice(0, 6).map((tab) => (
+      <section className="tabs-strip" aria-label="Current tab">
+        {activeTabs.map((tab) => (
           <button
             key={tab.id}
             className={`tab-chip ${tab.active ? "active" : ""}`}
             title={tab.url}
             type="button"
           >
-            <span>{tab.active ? "Active" : "Tab"}</span>
+            <span>Current tab</span>
             <strong>{tab.title}</strong>
           </button>
         ))}
@@ -962,6 +962,13 @@ export default function App() {
                     <span className={`mod-badge ${verdict}`}>{verdict}</span>
                   </div>
                   <p className="mod-prompt">{mod.prompt}</p>
+                  {mod.websites?.length ? (
+                    <div className="mod-websites" aria-label="Supported websites">
+                      {mod.websites.map((website) => (
+                        <span key={website}>{website}</span>
+                      ))}
+                    </div>
+                  ) : null}
                   {verified?.replay_url ? (
                     <a
                       className="replay-link"

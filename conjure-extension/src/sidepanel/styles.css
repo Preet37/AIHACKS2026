@@ -603,6 +603,25 @@ h2 {
   word-break: break-word;
 }
 
+.mod-websites {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: -2px 0 9px;
+}
+
+.mod-websites span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: #edf3ef;
+  color: #446057;
+  font-size: 11px;
+}
+
 .mod-actions,
 .mod-edit-actions {
   display: flex;

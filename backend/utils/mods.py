@@ -76,7 +76,17 @@ def list_mods(project_dir: Path) -> list[dict[str, Any]]:
     """Return all mod records, importing any legacy single-bundle project once."""
     migrate_legacy(project_dir)
     mods = _load_registry(project_dir).get("mods", [])
-    return sorted(mods, key=lambda m: m.get("created_at", 0))
+    enriched: list[dict[str, Any]] = []
+    for mod in mods:
+        record = dict(mod)
+        mod_id = str(mod.get("id", ""))
+        bundle = mod_bundle(project_dir, mod_id) if mod_id else None
+        if bundle is not None:
+            matches = list(bundle.get("matches", []))
+            record["matches"] = matches
+            record["websites"] = website_hosts_for_matches(matches)
+        enriched.append(record)
+    return sorted(enriched, key=lambda m: m.get("created_at", 0))
 
 
 def get_mod(project_dir: Path, mod_id: str) -> dict[str, Any] | None:
@@ -216,18 +226,50 @@ def active_bundles(project_dir: Path) -> list[dict[str, Any]]:
     return bundles
 
 
-def target_url_for_matches(matches: list[str]) -> str:
-    """Derive a concrete http(s) URL from a content-script match pattern, for
-    sandbox verification (e.g. ``*://www.youtube.com/*`` -> ``https://www.youtube.com``)."""
+def target_urls_for_matches(matches: list[str]) -> list[str]:
+    """Derive one concrete URL per website in a set of Chrome match patterns.
+
+    Scheme variants and repeated path patterns for the same host are collapsed,
+    while wildcard subdomains are verified at their concrete base domain.
+    """
+    urls: list[str] = []
+    seen_hosts: set[str] = set()
     for pattern in matches:
         match = re.match(r"^(\*|https?)://([^/*]+)", pattern)
         if not match:
             continue
-        host = match.group(2)
+        host = match.group(2).removeprefix("*.")
         if not host or host == "*":
             continue
-        return f"https://{host}"
-    return "https://example.com"
+        normalized_host = host.lower()
+        if normalized_host in seen_hosts:
+            continue
+        seen_hosts.add(normalized_host)
+        scheme = "https" if match.group(1) == "*" else match.group(1)
+        urls.append(f"{scheme}://{host}")
+    return urls or ["https://example.com"]
+
+
+def target_url_for_matches(matches: list[str]) -> str:
+    """Return the first concrete target URL (legacy single-site helper)."""
+    return target_urls_for_matches(matches)[0]
+
+
+def website_hosts_for_matches(matches: list[str]) -> list[str]:
+    """Return the distinct host labels represented by Chrome match patterns."""
+    hosts: list[str] = []
+    for pattern in matches:
+        if pattern == "<all_urls>":
+            return ["All websites"]
+        match = re.match(r"^(?:\*|https?)://([^/*]+)", pattern)
+        if not match:
+            continue
+        host = match.group(1)
+        if host == "*":
+            return ["All websites"]
+        if host not in hosts:
+            hosts.append(host)
+    return hosts
 
 
 def migrate_legacy(project_dir: Path) -> None:

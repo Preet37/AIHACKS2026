@@ -5,9 +5,9 @@ export const CONTENT_MESSAGE = {
 } as const;
 
 export const BACKGROUND_MESSAGE = {
-  GET_ACTIVE_TABS: "conjure:get_active_tabs",
+  GET_CURRENT_TAB: "conjure:get_current_tab",
   GET_CONSOLE_LOGS: "conjure:get_console_logs",
-  RELOAD_ALL_TABS_ONCE: "conjure:reload_all_tabs_once",
+  RELOAD_CURRENT_TAB_ONCE: "conjure:reload_current_tab_once",
   APPLY_MODS: "conjure:apply_mods",
   REMOVE_MOD: "conjure:remove_mod"
 } as const;
@@ -105,8 +105,8 @@ export interface GetElementHtmlMessage {
   maxChars?: number;
 }
 
-export interface GetActiveTabsMessage {
-  type: typeof BACKGROUND_MESSAGE.GET_ACTIVE_TABS;
+export interface GetCurrentTabMessage {
+  type: typeof BACKGROUND_MESSAGE.GET_CURRENT_TAB;
 }
 
 export interface GetConsoleLogsMessage {
@@ -117,8 +117,8 @@ export interface GetConsoleLogsMessage {
   limit?: number;
 }
 
-export interface ReloadAllTabsOnceMessage {
-  type: typeof BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE;
+export interface ReloadCurrentTabOnceMessage {
+  type: typeof BACKGROUND_MESSAGE.RELOAD_CURRENT_TAB_ONCE;
 }
 
 /** One mod's content-script bundle Conjure injects into the browser. */
@@ -139,13 +139,23 @@ export interface ModRecord {
   status: "active" | "disabled";
   created_at?: number;
   updated_at?: number;
+  matches?: string[];
+  websites?: string[];
   last_verified?: {
     passed: boolean;
     source?: string;
     target_url?: string;
+    target_urls?: string[];
     replay_url?: string;
     findings?: string[];
     at?: number;
+    results?: Array<{
+      target_url: string;
+      passed: boolean;
+      source?: string;
+      findings?: string[];
+      replay_url?: string;
+    }>;
   } | null;
 }
 
@@ -169,9 +179,9 @@ export type RuntimeRequest =
   | ContentConsoleEventMessage
   | GetPageContentMessage
   | GetElementHtmlMessage
-  | GetActiveTabsMessage
+  | GetCurrentTabMessage
   | GetConsoleLogsMessage
-  | ReloadAllTabsOnceMessage
+  | ReloadCurrentTabOnceMessage
   | ApplyModsMessage
   | RemoveModMessage;
 
