@@ -796,10 +796,7 @@ export default function App() {
         const session = stored[SESSION_STORAGE_KEY] as PersistedSession | undefined;
         if (session) {
           if (session.projectId) setProjectId(session.projectId);
-          if (session.conversationId) setConversationId(session.conversationId);
-          if (Array.isArray(session.messages) && session.messages.length > 0) {
-            setMessages(session.messages.map((message) => ({ ...message, streaming: false })));
-          }
+          // Don't restore old messages — each session starts fresh
         }
         hydratedRef.current = true;
       })
@@ -812,12 +809,12 @@ export default function App() {
     };
   }, []);
 
-  // Persist the session on every change once hydration has completed.
+  // Persist projectId only — messages always start fresh on reload.
   useEffect(() => {
     if (!hydratedRef.current) return;
-    const session: PersistedSession = { projectId, conversationId, messages };
+    const session: PersistedSession = { projectId, conversationId, messages: [] };
     chrome.storage.local.set({ [SESSION_STORAGE_KEY]: session }).catch(captureException);
-  }, [projectId, conversationId, messages]);
+  }, [projectId, conversationId]);
 
   useEffect(() => {
     void getActiveTabs();
