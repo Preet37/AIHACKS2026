@@ -264,7 +264,7 @@ export default function App() {
     voiceInitiatedRef.current = true;
     void submitChatRef.current?.(text);
   }, []);
-  const { voiceState, voiceError, amplitude, permissionState, requestPermission, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
+  const { voiceState, voiceError, barAmplitudes, permissionState, requestPermission, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
 
   const addSystemMessage = useCallback((content: string) => {
     setMessages((current) => [
@@ -874,37 +874,12 @@ export default function App() {
       <VoiceOverlay
         voiceState={voiceState}
         voiceError={voiceError}
-        amplitude={amplitude}
+        barAmplitudes={barAmplitudes}
         permissionState={permissionState}
         onRequestPermission={requestPermission}
       />
 
-      <section className="project-row" aria-label="Project">
-        <label htmlFor="projectId">Project</label>
-        <input
-          id="projectId"
-          value={projectId}
-          onChange={(event) => setProjectId(event.target.value)}
-          disabled={connectionState === "connected"}
-        />
-        <button type="button" title="Refresh active tabs" onClick={refreshTabs} className="icon-button">
-          <RefreshCcw aria-hidden="true" />
-        </button>
-      </section>
-
-      <section className="tabs-strip" aria-label="Open tabs">
-        {activeTabs.slice(0, 6).map((tab) => (
-          <button
-            key={tab.id}
-            className={`tab-chip ${tab.active ? "active" : ""}`}
-            title={tab.url}
-            type="button"
-          >
-            <span>{tab.active ? "Active" : "Tab"}</span>
-            <strong>{tab.title}</strong>
-          </button>
-        ))}
-      </section>
+      {/* Project row and tabs strip hidden — config is internal */}
 
       <section className="chat-log" aria-label="Conversation">
         {messages.map((message) => (
@@ -921,34 +896,6 @@ export default function App() {
       </section>
 
       <section className="workbench" aria-label="Agent work">
-        <div className="panel-section tools-panel">
-          <div className="section-title">
-            <Terminal aria-hidden="true" />
-            <h2>Tools</h2>
-          </div>
-          {tools.length === 0 ? (
-            <p className="empty">No tool calls yet.</p>
-          ) : (
-            <ol className="tool-list">
-              {tools.slice(0, 5).map((tool) => (
-                <li key={tool.id} className={tool.status}>
-                  <span className="tool-icon">
-                    {tool.status === "running" ? (
-                      <Loader2 aria-hidden="true" className="spin" />
-                    ) : (
-                      <CheckCircle2 aria-hidden="true" />
-                    )}
-                  </span>
-                  <span>
-                    <strong>{tool.name}</strong>
-                    {tool.args ? <code>{JSON.stringify(tool.args).slice(0, 120)}</code> : null}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          )}
-        </div>
-
         <div className="panel-section sandbox-panel">
           <div className="section-title">
             <Wrench aria-hidden="true" />
