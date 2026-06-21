@@ -303,8 +303,11 @@ const handleRuntimeMessage = async (
       return applyMods(message as ApplyModsMessage);
     case BACKGROUND_MESSAGE.REMOVE_MOD:
       return removeMod(message as RemoveModMessage);
+    case CONTENT_MESSAGE.VOICE_HOTKEY:
+      // Relayed from content script to all extension pages (side panel handles it)
+      return { ok: true };
     default:
-      return { ok: false, error: "Unsupported runtime message." };
+      return { ok: true }; // silently ignore unknown messages to avoid error logs
   }
 };
 
