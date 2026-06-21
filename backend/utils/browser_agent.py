@@ -82,6 +82,10 @@ class BrowserAgentSettings:
     use_proxies: bool = True
     verified: bool = False
     advanced_stealth: bool = False
+    # When True the finder only reads the user's current tab — it never rewrites
+    # the URL into a search, navigates to candidate pages, or runs the roaming
+    # search agent. Findings are whatever is present on that one page.
+    current_tab_only: bool = True
 
 
 class BrowserAgentError(RuntimeError):
@@ -456,16 +460,29 @@ async def _drive_session(
     async_playwright: Any,
 ) -> list[dict[str, Any]]:
     async def browse_with_stagehand(browser_context: Any | None = None) -> list[dict[str, Any]]:
+        page = None
+        if browser_context is not None:
+            pages = getattr(browser_context, "pages", [])
+            page = pages[-1] if pages else None
+
+        if settings.current_tab_only:
+            # Stay on the user's current tab: load exactly start_url and return
+            # whatever items are on that page — no search rewrite, no navigating
+            # to candidate pages, no roaming search agent.
+            await _navigate_with_agent_fallback(session, start_url, settings)
+            limit = max(1, settings.max_results)
+            dom_candidates = await _extract_dom_items(page, task, start_url, limit)
+            if dom_candidates:
+                return dom_candidates[:limit]
+            candidates = await _extract_items(session, task, limit)
+            return candidates[:limit]
+
         browse_url = _fast_shopping_search_url(start_url, task) or start_url
         await _navigate_with_agent_fallback(session, browse_url, settings)
         candidate_limit = max(1, min(settings.max_results, FAST_CANDIDATE_LIMIT))
 
         # Fast path: read real product anchors directly from the Browserbase-hosted
         # page. This avoids an LLM round trip on ordinary search/results pages.
-        page = None
-        if browser_context is not None:
-            pages = getattr(browser_context, "pages", [])
-            page = pages[-1] if pages else None
         dom_candidates = await _extract_dom_items(page, task, browse_url, candidate_limit)
         verified = await _first_reachable_item(session, dom_candidates, browse_url)
         if verified:

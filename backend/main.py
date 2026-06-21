@@ -69,6 +69,7 @@ async def run_agent_task(project_id: str, payload: AgentTaskRequest) -> dict[str
         use_proxies=settings.browse_use_proxies,
         verified=settings.browse_verified,
         advanced_stealth=settings.browse_advanced_stealth,
+        current_tab_only=settings.browse_current_tab_only,
     )
     blocker = browser_agent.missing_requirement(browse_settings)
     if blocker:

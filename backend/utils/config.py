@@ -69,6 +69,7 @@ class Settings:
     browse_use_proxies: bool = True
     browse_verified: bool = False
     browse_advanced_stealth: bool = False
+    browse_current_tab_only: bool = True
 
     @property
     def effective_demo_mode(self) -> bool:
@@ -108,4 +109,5 @@ def load_settings() -> Settings:
         browse_use_proxies=_env_bool("BROWSE_USE_PROXIES", True),
         browse_verified=_env_bool("BROWSE_VERIFIED", False),
         browse_advanced_stealth=_env_bool("BROWSE_ADVANCED_STEALTH", False),
+        browse_current_tab_only=_env_bool("BROWSE_CURRENT_TAB_ONLY", True),
     )
