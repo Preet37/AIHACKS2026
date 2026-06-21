@@ -12,7 +12,6 @@ import {
   Send,
   Terminal,
   Trash2,
-  Wrench,
   XCircle
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -30,6 +29,8 @@ import {
   SERVER_EVENT,
   type ActiveTabSnapshot,
   type ApplyModsResult,
+  type AgentProvider,
+  type AgentPullRequest,
   type ClientToServerEvent,
   type ConsoleLogEntry,
   type GeneratedBundle,
@@ -69,29 +70,14 @@ interface ToolRun {
   endedAt?: number;
 }
 
-interface SandboxScreenshot {
-  id: string;
-  url?: string;
-  data?: string;
-  createdAt: number;
-}
-
-interface SandboxHealingStep {
-  id: string;
-  iteration: number;
-  fixSummary?: string;
-}
-
-interface SandboxState {
+interface AgentRunState {
   active: boolean;
-  targetUrl?: string;
-  screenshots: SandboxScreenshot[];
-  healing: SandboxHealingStep[];
-  result?: {
-    passed: boolean;
-    findings: string[];
-    replayUrl?: string;
-  };
+  provider?: AgentProvider;
+  phrase: string;
+  status?: string;
+  statusDetail?: string;
+  sessionUrl?: string;
+  pullRequests: AgentPullRequest[];
 }
 
 
@@ -223,19 +209,19 @@ export default function App() {
     {
       id: makeId(),
       role: "assistant",
-      content: "Tell me what to build for this browser. I can inspect active tabs, stream tool work, and show sandbox results here.",
+      content: "Tell me what to build for this browser. I will route the work to the configured agent and keep progress visible here.",
       createdAt: Date.now()
     }
   ]);
   const [activeTabs, setActiveTabs] = useState<ActiveTabSnapshot[]>([]);
-  const [tools, setTools] = useState<ToolRun[]>([]);
-  const [sandbox, setSandbox] = useState<SandboxState>({
+  const [agentRun, setAgentRun] = useState<AgentRunState>({
     active: false,
-    screenshots: [],
-    healing: []
+    phrase: "Waiting for an agent run.",
+    pullRequests: []
   });
   const [mods, setMods] = useState<ModRecord[]>([]);
   const [editingMod, setEditingMod] = useState<{ id: string; prompt: string } | null>(null);
+  const [tools, setTools] = useState<ToolRun[]>([]);
   const [rules, setRules] = useState<string[]>([]);
   const [statusText, setStatusText] = useState("Ready");
 
@@ -545,6 +531,18 @@ export default function App() {
           });
           setStatusText("Tool complete");
           return;
+        case SERVER_EVENT.AGENT_STATUS:
+          setAgentRun({
+            active: Boolean(event.active),
+            provider: event.provider,
+            phrase: event.phrase,
+            status: event.status,
+            statusDetail: event.status_detail,
+            sessionUrl: event.session_url,
+            pullRequests: event.pull_requests || []
+          });
+          setStatusText(event.phrase);
+          return;
         case SERVER_EVENT.THINKING:
           setStatusText("Thinking");
           return;
@@ -553,57 +551,6 @@ export default function App() {
           return;
         case SERVER_EVENT.REQUEST_CONSOLE_LOGS:
           void handleRequestConsoleLogs(raw);
-          return;
-        case SERVER_EVENT.SANDBOX_START:
-          setSandbox((current) => ({
-            ...current,
-            active: true,
-            targetUrl: readString(raw, "target_url", "targetUrl"),
-            result: undefined
-          }));
-          setStatusText("Sandbox running");
-          return;
-        case SERVER_EVENT.SANDBOX_SCREENSHOT:
-          setSandbox((current) => ({
-            ...current,
-            active: true,
-            screenshots: [
-              {
-                id: makeId(),
-                url: readString(raw, "url"),
-                data: readString(raw, "data"),
-                createdAt: Date.now()
-              },
-              ...current.screenshots
-            ].slice(0, 5)
-          }));
-          return;
-        case SERVER_EVENT.SANDBOX_RESULT:
-          setSandbox((current) => ({
-            ...current,
-            active: false,
-            result: {
-              passed: Boolean(raw.passed),
-              findings: Array.isArray(raw.findings) ? raw.findings.map(String) : [],
-              replayUrl: readString(raw, "replay_url", "replayUrl")
-            }
-          }));
-          setStatusText(Boolean(raw.passed) ? "Sandbox passed" : "Sandbox failed");
-          return;
-        case SERVER_EVENT.SANDBOX_HEALING:
-          setSandbox((current) => ({
-            ...current,
-            active: true,
-            healing: [
-              {
-                id: makeId(),
-                iteration: readNumber(raw, "iteration") || current.healing.length + 1,
-                fixSummary: readString(raw, "fix_summary", "fixSummary")
-              },
-              ...current.healing
-            ]
-          }));
-          setStatusText("Healing sandbox issue");
           return;
         case SERVER_EVENT.EXTENSION_READY: {
           const bundles = (event as { bundles?: GeneratedBundle[] }).bundles || [];
@@ -622,10 +569,17 @@ export default function App() {
           return;
         case SERVER_EVENT.DONE:
           finalizeAssistant(event.content);
+          setAgentRun((current) => ({ ...current, active: false }));
           setStatusText("Ready");
           return;
         case SERVER_EVENT.ERROR:
           finalizeAssistant();
+          setAgentRun({
+            active: false,
+            phrase: event.message,
+            status: "error",
+            pullRequests: []
+          });
           setMessages((current) => [
             ...current,
             {
@@ -698,6 +652,13 @@ export default function App() {
   const submitChat = useCallback(
     async (query: string, modId?: string) => {
       currentAssistantIdRef.current = null;
+      setAgentRun({
+        active: true,
+        phrase: "Starting agent...",
+        status: "running",
+        pullRequests: []
+      });
+      setTools([]);
       setMessages((current) => [
         ...current,
         {
@@ -820,6 +781,27 @@ export default function App() {
       <Circle aria-hidden="true" />
     );
 
+  const agentStatusClass = agentRun.active
+    ? "running"
+    : agentRun.status === "exit"
+      ? "passed"
+      : agentRun.status === "error" || agentRun.status === "suspended" || agentRun.phrase.includes("blocked")
+        ? "failed"
+        : "idle";
+
+  const pullRequestLinks = agentRun.pullRequests
+    .map((pullRequest) => pullRequest.pr_url || pullRequest.url || pullRequest.html_url)
+    .filter((url): url is string => Boolean(url));
+
+  const providerLabel =
+    agentRun.provider === "claude"
+      ? "Claude"
+      : agentRun.provider === "nemotron"
+        ? "Nemotron"
+        : agentRun.provider === "devin"
+          ? "Devin"
+          : "Agent";
+
   return (
     <main className="shell">
       <header className="topbar">
@@ -879,7 +861,47 @@ export default function App() {
         <div ref={messagesEndRef} />
       </section>
 
-      <section className="workbench" aria-label="Agent work">
+      <section className="workbench agent-workbench" aria-label="Agent progress">
+        <div className="panel-section agent-panel">
+          <div className="section-title">
+            <Terminal aria-hidden="true" />
+            <h2>{providerLabel}</h2>
+          </div>
+
+          <div className={`status-line ${agentStatusClass}`}>
+            {agentRun.active ? (
+              <Loader2 aria-hidden="true" className="spin" />
+            ) : agentStatusClass === "passed" ? (
+              <CheckCircle2 aria-hidden="true" />
+            ) : agentStatusClass === "failed" ? (
+              <AlertTriangle aria-hidden="true" />
+            ) : (
+              <Circle aria-hidden="true" />
+            )}
+            <span>{agentRun.phrase}</span>
+          </div>
+
+          {agentRun.sessionUrl ? (
+            <a className="replay-link" href={agentRun.sessionUrl} target="_blank" rel="noreferrer">
+              <ExternalLink aria-hidden="true" />
+              Agent session
+            </a>
+          ) : null}
+
+          {pullRequestLinks.length ? (
+            <ol className="agent-links">
+              {pullRequestLinks.map((url, index) => (
+                <li key={url}>
+                  <a href={url} target="_blank" rel="noreferrer">
+                    <ExternalLink aria-hidden="true" />
+                    Pull request {index + 1}
+                  </a>
+                </li>
+              ))}
+            </ol>
+          ) : null}
+        </div>
+
         <div className="panel-section tools-panel">
           <div className="section-title">
             <Terminal aria-hidden="true" />
@@ -906,65 +928,6 @@ export default function App() {
               ))}
             </ol>
           )}
-        </div>
-
-        <div className="panel-section sandbox-panel">
-          <div className="section-title">
-            <Wrench aria-hidden="true" />
-            <h2>Sandbox</h2>
-          </div>
-          {sandbox.active ? (
-            <div className="status-line running">
-              <Loader2 aria-hidden="true" className="spin" />
-              <span>{sandbox.targetUrl || "Browserbase run in progress"}</span>
-            </div>
-          ) : sandbox.result ? (
-            <div className={`status-line ${sandbox.result.passed ? "passed" : "failed"}`}>
-              {sandbox.result.passed ? (
-                <CheckCircle2 aria-hidden="true" />
-              ) : (
-                <AlertTriangle aria-hidden="true" />
-              )}
-              <span>{sandbox.result.passed ? "Passed" : "Needs fixes"}</span>
-            </div>
-          ) : (
-            <p className="empty">Waiting for a sandbox run.</p>
-          )}
-
-          {sandbox.screenshots[0]?.data || sandbox.screenshots[0]?.url ? (
-            <div className="screenshot-frame">
-              <img
-                src={sandbox.screenshots[0].data || sandbox.screenshots[0].url}
-                alt="Latest sandbox screenshot"
-              />
-            </div>
-          ) : null}
-
-          {sandbox.result?.findings.length ? (
-            <ul className="findings">
-              {sandbox.result.findings.slice(0, 4).map((finding) => (
-                <li key={finding}>{finding}</li>
-              ))}
-            </ul>
-          ) : null}
-
-          {sandbox.result?.replayUrl ? (
-            <a className="replay-link" href={sandbox.result.replayUrl} target="_blank" rel="noreferrer">
-              <ExternalLink aria-hidden="true" />
-              Replay
-            </a>
-          ) : null}
-
-          {sandbox.healing.length ? (
-            <ol className="healing-list">
-              {sandbox.healing.slice(0, 3).map((step) => (
-                <li key={step.id}>
-                  <strong>Iteration {step.iteration}</strong>
-                  <span>{step.fixSummary || "Applying fix"}</span>
-                </li>
-              ))}
-            </ol>
-          ) : null}
         </div>
       </section>
 

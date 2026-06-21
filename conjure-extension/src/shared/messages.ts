@@ -26,6 +26,7 @@ export const SERVER_EVENT = {
   THINKING: "thinking",
   REQUEST_TAB_CONTENT: "request_tab_content",
   REQUEST_CONSOLE_LOGS: "request_console_logs",
+  AGENT_STATUS: "agent_status",
   SANDBOX_START: "sandbox_start",
   SANDBOX_SCREENSHOT: "sandbox_screenshot",
   SANDBOX_RESULT: "sandbox_result",
@@ -212,11 +213,31 @@ export interface SandboxResult {
   replay_url?: string;
 }
 
+export interface AgentPullRequest {
+  pr_url?: string;
+  url?: string;
+  html_url?: string;
+  title?: string;
+}
+
+export type AgentProvider = "devin" | "claude" | "nemotron";
+
 export type ServerToClientEvent =
   | { type: typeof SERVER_EVENT.CONVERSATION_ID; conversation_id: string }
   | { type: typeof SERVER_EVENT.CONTENT; content: string }
   | ToolStatusEvent
   | { type: typeof SERVER_EVENT.THINKING }
+  | {
+      type: typeof SERVER_EVENT.AGENT_STATUS;
+      provider: AgentProvider;
+      phrase: string;
+      status?: string;
+      status_detail?: string;
+      session_id?: string;
+      session_url?: string;
+      pull_requests?: AgentPullRequest[];
+      active?: boolean;
+    }
   | {
       type: typeof SERVER_EVENT.REQUEST_TAB_CONTENT;
       request_id: string;

@@ -62,8 +62,8 @@ async def delete_project_mod(project_id: str, mod_id: str) -> dict[str, Any]:
 async def websocket_endpoint(websocket: WebSocket, project_id: str) -> None:
     await websocket.accept()
     settings = load_settings()
-    agent = ConjureAgent(settings)
     store = await _open_store()
+    agent = ConjureAgent(settings, store=store)
     chat_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
     pending_tab_requests: dict[str, asyncio.Future[Any]] = {}
     receiver = asyncio.create_task(
