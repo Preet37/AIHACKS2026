@@ -7,10 +7,7 @@ from typing import Any, Iterable
 from urllib.parse import urlparse
 
 
-SIMULAR_ENV_KEYS = (
-    "SIMULAR_API_KEY",
-    "ANTHROPIC_API_KEY",
-)
+SIMULAR_ENV_KEYS = ("SIMULAR_API_KEY",)
 
 
 @dataclass
@@ -60,11 +57,10 @@ async def drive_with_simular(
     feature_description: str,
     target_url: str | None = None,
 ) -> TesterVerdict:
-    """Future Simular/Sai or Agent-S integration boundary.
+    """Future Simular/Sai integration boundary.
 
-    Public Simular Agent-S docs currently describe model-provider keys. The hosted
-    Simular/Sai API contract is intentionally isolated here so the sandbox layer
-    does not change when that client is added.
+    The hosted Simular/Sai API contract is intentionally isolated here so the
+    sandbox layer does not change when that client is added.
     """
     del page, target_url
 
@@ -73,7 +69,7 @@ async def drive_with_simular(
             passed=True,
             source="simular_unconfigured",
             findings=[
-                "Simular agentic pass skipped: configure SIMULAR_API_KEY when a hosted Simular API is available, or ANTHROPIC_API_KEY for an Agent-S based local driver",
+                "Simular agentic pass skipped: configure SIMULAR_API_KEY when a hosted Simular API is available",
                 f"Feature prompt reserved for Simular: {feature_description}",
             ],
         )
@@ -94,6 +90,5 @@ def env_notes() -> dict[str, list[str]]:
         "simular": list(SIMULAR_ENV_KEYS),
         "notes": [
             "SIMULAR_API_KEY is reserved for the hosted Simular/Sai tester once API access is available",
-            "ANTHROPIC_API_KEY is needed when using Agent-S with Anthropic-backed computer-use reasoning",
         ],
     }

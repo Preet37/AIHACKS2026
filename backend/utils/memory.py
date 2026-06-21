@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import inspect
-import json
 import os
 import re
 from typing import Any, Awaitable, Callable, Iterable, Mapping, Sequence
@@ -10,13 +9,6 @@ from typing import Any, Awaitable, Callable, Iterable, Mapping, Sequence
 RuleExtractor = Callable[
     [Sequence[Mapping[str, Any]], Sequence[str]], Awaitable[Sequence[str]] | Sequence[str]
 ]
-
-
-MEMORY_SYSTEM_PROMPT = (
-    "Extract concise behavioral directives for future turns. "
-    "Do not duplicate existing rules. Return only a JSON array of strings. "
-    "Return [] when nothing durable should be remembered."
-)
 
 
 async def extract_rules(
@@ -38,11 +30,7 @@ async def extract_rules(
     if demo_mode:
         return _dedupe_rules(_extract_demo_candidates(history), existing)
 
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        return []
-
-    return _dedupe_rules(await _extract_with_anthropic(history, existing, api_key), existing)
+    return []
 
 
 async def load_rules(store: Any, project_id: str) -> list[str]:
@@ -83,69 +71,6 @@ async def extract_and_save_rules(
         extractor=extractor,
     )
     return await save_rules(store, project_id, candidates)
-
-
-async def _extract_with_anthropic(
-    history: Sequence[Mapping[str, Any]],
-    existing_rules: Sequence[str],
-    api_key: str,
-) -> list[str]:
-    try:
-        from anthropic import AsyncAnthropic
-    except ImportError:
-        return []
-
-    model = os.getenv("ANTHROPIC_MEMORY_MODEL", "claude-3-5-haiku-latest")
-    client = AsyncAnthropic(api_key=api_key)
-    payload = {
-        "existing_rules": list(existing_rules),
-        "conversation": [
-            {"role": item.get("role", ""), "content": item.get("content", "")}
-            for item in history
-        ],
-    }
-    try:
-        response = await client.messages.create(
-            model=model,
-            max_tokens=512,
-            temperature=0,
-            system=MEMORY_SYSTEM_PROMPT,
-            messages=[
-                {
-                    "role": "user",
-                    "content": json.dumps(payload, ensure_ascii=True),
-                }
-            ],
-        )
-    except Exception:
-        return []
-
-    text = _anthropic_text(response)
-    parsed = _parse_json_array(text)
-    return [item for item in parsed if isinstance(item, str)]
-
-
-def _anthropic_text(response: Any) -> str:
-    parts: list[str] = []
-    for block in getattr(response, "content", []) or []:
-        text = getattr(block, "text", None)
-        if text:
-            parts.append(text)
-    return "\n".join(parts)
-
-
-def _parse_json_array(text: str) -> list[Any]:
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\[[\s\S]*\]", text)
-        if not match:
-            return []
-        try:
-            parsed = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            return []
-    return parsed if isinstance(parsed, list) else []
 
 
 def _extract_demo_candidates(history: Sequence[Mapping[str, Any]]) -> list[str]:

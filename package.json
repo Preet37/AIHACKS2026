@@ -5,12 +5,12 @@
   "description": "Root developer workflow scripts for the conjure hackathon workspace.",
   "scripts": {
     "dev": "node -e \"console.log('Run npm run dev:backend and npm run dev:extension in separate terminals.')\"",
-    "dev:backend": "python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000",
+    "dev:backend": "python3 -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000",
     "dev:extension": "npm --prefix conjure-extension run dev",
     "build:extension": "npm --prefix conjure-extension run build",
-    "test": "python -m unittest discover -s tests/smoke",
-    "test:smoke": "python -m unittest discover -s tests/smoke",
-    "test:backend-smoke": "python -m unittest discover -s tests/smoke -p test_backend_smoke.py"
+    "test": "python3 -m unittest discover -s tests/smoke",
+    "test:smoke": "python3 -m unittest discover -s tests/smoke",
+    "test:backend-smoke": "python3 -m unittest discover -s tests/smoke -p test_backend_smoke.py"
   },
   "engines": {
     "node": ">=20"
