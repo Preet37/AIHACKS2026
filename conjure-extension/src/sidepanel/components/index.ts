@@ -11,4 +11,3 @@ export { OptionCard } from "./OptionCard";
 export { CommandInput } from "./CommandInput";
 export { StatusBar, type Workspace } from "./StatusBar";
 export { SelectionOverlay, type OverlayTool } from "./SelectionOverlay";
-export { NeofetchSplash } from "./NeofetchSplash";

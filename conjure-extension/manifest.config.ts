@@ -30,7 +30,7 @@ export default defineManifest((env) => ({
     type: "module"
   },
   content_security_policy: {
-    extension_pages: "script-src 'self'; object-src 'self'"
+    extension_pages: "script-src 'self'; object-src 'self'; font-src 'self'"
   },
   content_scripts: [
     {

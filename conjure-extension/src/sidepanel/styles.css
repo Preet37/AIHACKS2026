@@ -85,11 +85,7 @@ figure {
   overflow: hidden;
   border-right: 1px solid var(--cj-line);
   /* faint 40px grid — a quiet WM texture, drawn from a token, not a glow */
-  background:
-    linear-gradient(color-mix(in srgb, var(--cj-text) 3%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--cj-text) 3%, transparent) 1px, transparent 1px),
-    var(--cj-ground);
-  background-size: 40px 40px;
+  background: var(--cj-ground);
 }
 
 .conjure-panel {

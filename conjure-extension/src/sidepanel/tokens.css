@@ -22,8 +22,8 @@
 }
 
 @font-face {
-  font-family: "Departure Mono";
-  src: url("/fonts/DepartureMono-Regular.woff2") format("woff2");
+  font-family: "Silkscreen";
+  src: url("/fonts/Silkscreen-Regular.woff2") format("woff2");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -34,7 +34,8 @@
   --cj-ground:        #08080F; /* working surface — all dense chrome */
   --cj-surface:       #101026; /* raised panes, inputs, windows */
   --cj-surface-2:     #16163A; /* hover / nested surface */
-  --cj-loud:          #222290; /* royal indigo — splash & empty states ONLY */
+  --cj-loud:          #222290; /* royal indigo — legacy loud ground */
+  --cj-overlay-loud:  #222290; /* command overlay scrim/border */
 
   /* text */
   --cj-text:          #F0F0F5;
@@ -58,7 +59,7 @@
 
   /* type */
   --cj-font-mono:  'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
-  --cj-font-pixel: 'Departure Mono', 'Silkscreen', monospace; /* wordmark + splash only */
+  --cj-font-pixel: 'Silkscreen', 'JetBrains Mono', monospace; /* wordmark only */
 
   /* type scale */
   --cj-fs-micro: 11px; /* metadata keys, hints, footer */

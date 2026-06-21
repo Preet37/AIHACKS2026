@@ -16,6 +16,12 @@
   padding: 0;
 }
 
+.hp-mod-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
 /* MODS pane: each mod row */
 .hp-mod-row {
   display: grid;

@@ -73,6 +73,10 @@
   letter-spacing: 0.04em;
   cursor: pointer;
 }
+.cj-statusbar__brand span {
+  font-family: var(--cj-font-pixel);
+  font-size: var(--cj-fs-body);
+}
 .cj-statusbar__spaces {
   display: flex;
   flex: 1 1 auto;
@@ -509,73 +513,6 @@
 .cj-selection__handle--br {
   right: -4px;
   bottom: -4px;
-}
-
-/* ── NeofetchSplash (§6, loud) ─────────────────────────────────────────── */
-.cj-splash {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: clamp(28px, 7vw, 80px);
-  padding: 24px;
-  background: var(--cj-loud);
-}
-.cj-splash__mark {
-  display: grid;
-  grid-template-columns: repeat(4, 26px);
-  grid-template-rows: repeat(5, 26px);
-  gap: 3px;
-}
-.cj-splash__px {
-  background: transparent;
-}
-.cj-splash__px--on {
-  background: var(--cj-on-loud);
-}
-.cj-splash__readout {
-  display: grid;
-  gap: 22px;
-  min-width: 260px;
-}
-.cj-splash__wordmark {
-  margin: 0;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--cj-line-loud);
-  color: var(--cj-on-loud);
-  font-family: var(--cj-font-pixel);
-  font-size: var(--cj-fs-hero);
-  font-weight: var(--cj-w-regular);
-  line-height: 1;
-  letter-spacing: 0.04em;
-}
-.cj-splash__palette {
-  display: flex;
-  gap: 8px;
-  padding-top: 20px;
-  border-top: 1px solid var(--cj-line-loud);
-}
-.cj-splash__palette span {
-  width: 32px;
-  height: 22px;
-  border: 1px solid var(--cj-line-loud);
-}
-
-.cj-splash__palette span:nth-child(1) {
-  background: var(--cj-ground);
-}
-.cj-splash__palette span:nth-child(2) {
-  background: var(--cj-surface);
-}
-.cj-splash__palette span:nth-child(3) {
-  background: var(--cj-dim);
-}
-.cj-splash__palette span:nth-child(4) {
-  background: var(--cj-text);
-}
-.cj-splash__palette span:nth-child(5) {
-  background: var(--cj-accent);
 }
 
 /* ── Shared keyboard focus (§8) — visible accent ring everywhere ───────── */

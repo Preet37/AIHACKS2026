@@ -37,6 +37,7 @@ let commandHost: HTMLDivElement | null = null;
 let commandShadow: ShadowRoot | null = null;
 let commandOpen = false;
 let selectedSuggestion = 0;
+let overlayFontsLoaded = false;
 
 const overlayFontUrl = (path: string) => {
   try {
@@ -47,6 +48,13 @@ const overlayFontUrl = (path: string) => {
 };
 
 const commandStyles = () => `
+  @font-face {
+    font-family: "Silkscreen";
+    src: url("${overlayFontUrl("fonts/Silkscreen-Regular.woff2")}") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+  }
   @font-face {
     font-family: "JetBrains Mono";
     src: url("${overlayFontUrl("fonts/JetBrainsMono-Regular.woff2")}") format("woff2");
@@ -65,7 +73,7 @@ const commandStyles = () => `
     --cj-ground: #08080F;
     --cj-surface: #101026;
     --cj-surface-2: #16163A;
-    --cj-loud: #222290;
+    --cj-overlay-loud: #222290;
     --cj-text: #F0F0F5;
     --cj-dim: #8A8AA4;
     --cj-faint: #54546E;
@@ -87,7 +95,7 @@ const commandStyles = () => `
     position: fixed;
     inset: 0;
     z-index: 2147483647;
-    background: color-mix(in srgb, var(--cj-loud) 32%, transparent);
+    background: color-mix(in srgb, var(--cj-overlay-loud) 32%, transparent);
     display: grid;
     align-items: start;
     justify-items: center;
@@ -95,7 +103,7 @@ const commandStyles = () => `
   }
   .palette {
     width: min(620px, calc(100vw - 32px));
-    border: 1px solid var(--cj-loud);
+    border: 1px solid var(--cj-overlay-loud);
     background: var(--cj-surface);
     color: var(--cj-text);
   }
@@ -197,6 +205,29 @@ const commandStyles = () => `
     }
   }
 `;
+
+const loadOverlayFonts = () => {
+  if (overlayFontsLoaded || typeof FontFace === "undefined" || !document.fonts) return;
+  overlayFontsLoaded = true;
+  const faces = [
+    new FontFace("JetBrains Mono", `url("${overlayFontUrl("fonts/JetBrainsMono-Regular.woff2")}")`, {
+      weight: "400"
+    }),
+    new FontFace("JetBrains Mono", `url("${overlayFontUrl("fonts/JetBrainsMono-Medium.woff2")}")`, {
+      weight: "500"
+    }),
+    new FontFace("Silkscreen", `url("${overlayFontUrl("fonts/Silkscreen-Regular.woff2")}")`, {
+      weight: "400"
+    })
+  ];
+
+  for (const face of faces) {
+    face
+      .load()
+      .then((loaded) => document.fonts.add(loaded))
+      .catch(() => undefined);
+  }
+};
 
 const commandSuggestions = [
   {
@@ -360,6 +391,7 @@ const openCommandBar = () => {
     return;
   }
   commandOpen = true;
+  loadOverlayFonts();
   commandHost = document.createElement("div");
   commandHost.id = "conjure-command-bar-root";
   commandShadow = commandHost.attachShadow({ mode: "open" });
