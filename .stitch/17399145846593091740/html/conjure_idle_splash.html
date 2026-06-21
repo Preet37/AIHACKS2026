@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Conjure Idle Terminal</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Silkscreen&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface": "#101026",
+                        "primary-fixed": "#e2dfff",
+                        "on-primary-container": "#150093",
+                        "surface-variant": "#34343c",
+                        "text-faint": "#54546E",
+                        "surface-container": "#1f1f27",
+                        "on-primary-fixed-variant": "#342cbd",
+                        "secondary": "#c0c1ff",
+                        "surface-dim": "#13131a",
+                        "primary-container": "#8382ff",
+                        "inverse-primary": "#4d4ad5",
+                        "on-secondary": "#1d1c8c",
+                        "on-primary": "#1900a7",
+                        "primary-fixed-dim": "#c2c1ff",
+                        "on-background": "#e4e1ec",
+                        "on-tertiary": "#4d2600",
+                        "error-container": "#93000a",
+                        "inverse-surface": "#e4e1ec",
+                        "surface-container-high": "#2a2931",
+                        "background": "#13131a",
+                        "surface-container-lowest": "#0e0d15",
+                        "surface-container-highest": "#34343c",
+                        "error": "#ffb4ab",
+                        "on-surface": "#e4e1ec",
+                        "border-hairline": "rgba(240,240,245,0.14)",
+                        "on-secondary-container": "#b0b2ff",
+                        "tertiary-fixed": "#ffdcc3",
+                        "on-tertiary-container": "#432100",
+                        "surface-bright": "#393841",
+                        "secondary-container": "#393ba5",
+                        "text-dim": "#8A8AA4",
+                        "on-surface-variant": "#c7c4d7",
+                        "on-secondary-fixed-variant": "#3638a2",
+                        "accent-bright": "#ADABFF",
+                        "tertiary": "#ffb77d",
+                        "secondary-fixed-dim": "#c0c1ff",
+                        "outline": "#918fa0",
+                        "inverse-on-surface": "#303038",
+                        "on-tertiary-fixed-variant": "#6e3900",
+                        "surface-tint": "#c2c1ff",
+                        "tertiary-fixed-dim": "#ffb77d",
+                        "on-tertiary-fixed": "#2f1500",
+                        "tertiary-container": "#d57a1d",
+                        "secondary-fixed": "#e1e0ff",
+                        "primary": "#c2c1ff",
+                        "on-primary-fixed": "#0c006a",
+                        "outline-variant": "#464554",
+                        "on-error-container": "#ffdad6",
+                        "text-primary": "#F0F0F5",
+                        "on-secondary-fixed": "#06006c",
+                        "surface-container-low": "#1b1b23",
+                        "on-error": "#690005"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0px",
+                        "lg": "0px",
+                        "xl": "0px",
+                        "full": "0px"
+                    },
+                    "spacing": {
+                        "item-gap": "12px",
+                        "window-bar-y": "6px",
+                        "base": "11px",
+                        "container-padding": "22px",
+                        "block-gap": "20px",
+                        "window-bar-x": "10px"
+                    },
+                    "fontFamily": {
+                        "wordmark": ["Silkscreen"],
+                        "ui-small": ["JetBrains Mono"],
+                        "metadata-key": ["JetBrains Mono"],
+                        "display-sm": ["Silkscreen"],
+                        "body-md": ["JetBrains Mono"],
+                        "micro": ["JetBrains Mono"],
+                        "display-lg": ["Silkscreen"],
+                        "caption": ["JetBrains Mono"]
+                    },
+                    "fontSize": {
+                        "wordmark": ["46px", { "lineHeight": "1.0", "letterSpacing": "1px", "fontWeight": "400" }],
+                        "ui-small": ["12px", { "lineHeight": "1.0", "fontWeight": "400" }],
+                        "metadata-key": ["13px", { "lineHeight": "1.0", "letterSpacing": "0.14em", "fontWeight": "500" }],
+                        "display-sm": ["15px", { "lineHeight": "1.2", "fontWeight": "400" }],
+                        "body-md": ["16px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "micro": ["10px", { "lineHeight": "1.0", "fontWeight": "400" }],
+                        "display-lg": ["22px", { "lineHeight": "1.2", "fontWeight": "400" }],
+                        "caption": ["11px", { "lineHeight": "1.0", "letterSpacing": "0.1em", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body {
+            background-color: #222290;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        
+        /* Brutalist Pixel C */
+        .pixel-c {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(5, 1fr);
+            width: 120px;
+            height: 150px;
+            gap: 2px;
+        }
+        
+        .pixel-c > div {
+            background-color: transparent;
+        }
+        
+        .pixel-c > .fill {
+            background-color: #F0F0F5; /* text-primary */
+        }
+        
+        /* C Pattern */
+        .c-1, .c-2, .c-3, .c-4 { grid-row: 1; }
+        .c-1, .c-5, .c-9, .c-13, .c-17 { grid-column: 1; }
+        .c-17, .c-18, .c-19, .c-20 { grid-row: 5; }
+        .c-5, .c-9, .c-13 { grid-column: 1; }
+        .c-4 { grid-column: 4; grid-row: 2; }
+        .c-20 { grid-column: 4; grid-row: 4; }
+        
+        /* Palette Swatches */
+        .swatch-1 { background-color: #08080F; } /* surface-container-lowest approx */
+        .swatch-2 { background-color: #101026; } /* surface */
+        .swatch-3 { background-color: #8A8AA4; } /* text-dim */
+        .swatch-4 { background-color: #F0F0F5; } /* text-primary */
+        .swatch-5 { background-color: #6C6AF5; } /* accent primary based on prompt */
+        
+        /* Blinking Cursor */
+        .cursor-blink {
+            animation: blink 1s step-end infinite;
+        }
+        
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col justify-center items-center font-ui-small text-text-primary antialiased">
+<!-- Top Left Corner Decor (Optional, adds to neofetch vibe) -->
+<div class="fixed top-container-padding left-container-padding text-text-dim font-caption text-caption">
+        conjure-sys@v2.4.0 <span class="cursor-blink text-text-primary">▌</span>
+</div>
+<!-- Main Neofetch Container -->
+<main class="flex flex-col md:flex-row items-center md:items-start gap-12 md:gap-20 w-full max-w-4xl px-container-padding">
+<!-- Left Side: ASCII/Pixel Art Logo -->
+<div class="flex-shrink-0">
+<div class="pixel-c">
+<div class="fill c-1"></div>
+<div class="fill c-2"></div>
+<div class="fill c-3"></div>
+<div class="fill c-4" style="grid-column: 4; grid-row: 2;"></div>
+<div class="fill c-5"></div>
+<div class="c-6"></div>
+<div class="c-7"></div>
+<div class="c-8"></div>
+<div class="fill c-9"></div>
+<div class="c-10"></div>
+<div class="c-11"></div>
+<div class="c-12"></div>
+<div class="fill c-13"></div>
+<div class="c-14"></div>
+<div class="c-15"></div>
+<div class="c-20" style="grid-column: 4; grid-row: 4;"></div>
+<div class="fill c-17"></div>
+<div class="fill c-18"></div>
+<div class="fill c-19"></div>
+<div class="fill" style="grid-column: 4; grid-row: 1;"></div>
+<div class="fill" style="grid-column: 4; grid-row: 5;"></div>
+</div>
+</div>
+<!-- Right Side: System Info Readout -->
+<div class="flex flex-col gap-8 w-full md:w-auto">
+<!-- Wordmark -->
+<div class="border-b border-border-hairline pb-4 w-full">
+<h1 class="font-wordmark text-wordmark text-text-primary m-0 p-0 leading-none">conjure</h1>
+</div>
+<!-- Key/Value Data Rows -->
+<div class="flex flex-col gap-2 font-ui-small text-ui-small w-full">
+<!-- Mod Row -->
+<div class="flex">
+<span class="font-metadata-key text-metadata-key text-text-dim w-24">mods</span>
+<span class="text-text-primary">3 (2 active)</span>
+</div>
+<!-- Runs Row -->
+<div class="flex">
+<span class="font-metadata-key text-metadata-key text-text-dim w-24">runs</span>
+<span class="text-text-primary">1 queued</span>
+</div>
+<!-- Scope Row -->
+<div class="flex">
+<span class="font-metadata-key text-metadata-key text-text-dim w-24">scope</span>
+<span class="text-text-primary">global</span>
+</div>
+<!-- Voice Row -->
+<div class="flex">
+<span class="font-metadata-key text-metadata-key text-text-dim w-24">voice</span>
+<span class="text-text-primary">push-to-talk</span>
+</div>
+<!-- Status Row -->
+<div class="flex mt-2">
+<span class="font-metadata-key text-metadata-key text-text-dim w-24">status</span>
+<span class="text-text-primary"><span class="text-text-dim">■</span> idle — ready</span>
+</div>
+</div>
+<!-- Color Palette Swatches -->
+<div class="flex gap-2 mt-4 pt-6 border-t border-border-hairline w-full md:w-64">
+<div class="w-8 h-8 swatch-1 border border-border-hairline"></div>
+<div class="w-8 h-8 swatch-2 border border-border-hairline"></div>
+<div class="w-8 h-8 swatch-3 border border-border-hairline"></div>
+<div class="w-8 h-8 swatch-4 border border-border-hairline"></div>
+<div class="w-8 h-8 swatch-5 border border-border-hairline"></div>
+</div>
+</div>
+</main>
+<!-- Bottom Instruction Bar -->
+<div class="fixed bottom-0 left-0 w-full h-[60px] flex items-center justify-center border-t border-border-hairline bg-[#222290]">
+<p class="font-caption text-caption text-text-dim">type intent → the browser rewrites itself</p>
+</div>
+</body></html>

@@ -1,0 +1,118 @@
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Silkscreen:wght@400;700&display=swap">
+<style>
+.cj{--g:#08080f;--s:#101026;--loud:#222290;--t:#f0f0f5;--d:#8a8aa4;--f:#54546e;--acc:#6c6af5;--accB:#adabff;--line:rgba(240,240,245,0.14);background:#08080f;border:1px solid var(--line);padding:22px;font-family:'JetBrains Mono',monospace;color:var(--t)}
+.cj *{box-sizing:border-box}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.lbl{font-size:11px;color:var(--f);letter-spacing:.1em;margin:0 0 12px}
+.dv{height:1px;background:var(--line);margin:22px 0}
+.pix{font-family:'Silkscreen',monospace}
+.k{font-size:12px;color:var(--d)}
+.v{font-size:12px;color:var(--t)}
+.acc{color:var(--acc)}
+.win{border:1px solid var(--line);background:var(--s)}
+.bar{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--line);font-size:11px;color:var(--d)}
+.ctl{margin-left:auto;display:flex;gap:9px;color:var(--f);font-size:10px}
+</style>
+<div class="cj">
+<h2 class="sr-only">Conjure design language re-hued to indigo: an indigo-tinted near-black working ground, a single electric-indigo accent replacing the former coral, and a saturated royal-indigo ground for the loud splash surface. Monospace and pixel type, square corners, hairline borders, square status blocks.</h2>
+
+<div style="display:flex;align-items:center;font-size:11px;color:var(--d);border:1px solid var(--line);padding:5px 10px;margin-bottom:20px">
+  <span class="acc">■</span>&nbsp; conjure
+  <span style="color:var(--f);margin:0 10px">[1] [2] [3]</span>
+  <span style="margin-left:auto">ready · ⌘K</span>
+</div>
+
+<div class="pix" style="font-size:46px;line-height:1;color:var(--t);letter-spacing:1px">CONJURE<span class="acc" style="font-family:'JetBrains Mono'">▌</span></div>
+<div style="font-size:12px;color:var(--d);margin-top:12px">type intent &nbsp;→&nbsp; the browser rewrites itself</div>
+
+<div class="dv"></div>
+<p class="lbl">// palette — two grounds, one accent</p>
+<div style="display:flex;flex-wrap:wrap;gap:14px">
+  <div><div style="width:54px;height:38px;background:#08080f;border:1px solid var(--line)"></div><div style="font-size:10px;margin-top:5px">#08080F</div><div style="font-size:10px;color:var(--f)">work ground</div></div>
+  <div><div style="width:54px;height:38px;background:#101026;border:1px solid var(--line)"></div><div style="font-size:10px;margin-top:5px">#101026</div><div style="font-size:10px;color:var(--f)">surface</div></div>
+  <div><div style="width:54px;height:38px;background:#222290;border:1px solid var(--line)"></div><div style="font-size:10px;margin-top:5px">#222290</div><div style="font-size:10px;color:var(--f)">loud ground</div></div>
+  <div><div style="width:54px;height:38px;background:#f0f0f5;border:1px solid var(--line)"></div><div style="font-size:10px;margin-top:5px">#F0F0F5</div><div style="font-size:10px;color:var(--f)">text</div></div>
+  <div><div style="width:54px;height:38px;background:#8a8aa4;border:1px solid var(--line)"></div><div style="font-size:10px;margin-top:5px">#8A8AA4</div><div style="font-size:10px;color:var(--f)">dim</div></div>
+  <div><div style="width:54px;height:38px;background:#6c6af5;border:1px solid var(--line)"></div><div style="font-size:10px;margin-top:5px">#6C6AF5</div><div style="font-size:10px;color:var(--acc)">accent</div></div>
+</div>
+
+<div class="dv"></div>
+<p class="lbl">// type — three roles</p>
+<div style="display:flex;align-items:baseline;gap:16px;margin-bottom:14px">
+  <span class="pix" style="font-size:22px">Aa CONJURE</span><span style="font-size:11px;color:var(--d)">pixel display · wordmark + splash only</span>
+</div>
+<div style="display:flex;align-items:baseline;gap:16px;margin-bottom:14px">
+  <span style="font-size:16px">the quick brown fox 0123</span><span style="font-size:11px;color:var(--d)">jetbrains mono · input, logs, body</span>
+</div>
+<div style="display:flex;align-items:baseline;gap:16px">
+  <span style="font-size:13px;letter-spacing:.14em">SCOPE&nbsp; TYPE&nbsp; STATE</span><span style="font-size:11px;color:var(--d)">mono caps · metadata keys</span>
+</div>
+
+<div class="dv"></div>
+<p class="lbl">// signature component — metadata block</p>
+<div class="win" style="max-width:320px">
+  <div class="bar">mod ───────────────<span class="ctl"><span>■</span><span>✕</span></span></div>
+  <div style="padding:10px 12px;display:grid;grid-template-columns:auto 1fr;gap:5px 18px">
+    <span class="k">SCOPE</span><span class="v">youtube.com</span>
+    <span class="k">TYPE</span><span class="v">css</span>
+    <span class="k">STATE</span><span class="v"><span class="acc">■</span> active</span>
+    <span class="k">TRIGGER</span><span class="v">on-load</span>
+  </div>
+</div>
+
+<div class="dv"></div>
+<p class="lbl">// components</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
+  <div style="border:1px solid var(--line);padding:11px 12px;display:flex;align-items:center;justify-content:space-between">
+    <span style="font-size:12px">hide shorts</span>
+    <span style="width:30px;height:15px;background:rgba(108,106,245,0.20);border:1px solid var(--acc);position:relative;display:inline-block"><span style="position:absolute;width:11px;height:11px;background:var(--acc);top:1px;right:1px"></span></span>
+  </div>
+  <div style="border:1px solid var(--line);padding:11px 12px;display:flex;align-items:center;gap:10px">
+    <span style="border:1px solid var(--acc);color:var(--acc);padding:3px 12px;font-size:12px">[ run ↗ ]</span>
+    <span style="font-size:11px;color:var(--acc)">■ running 2/4</span>
+  </div>
+  <div style="border:1px solid var(--line);padding:11px 12px;display:flex;align-items:center;justify-content:center">
+    <span style="position:relative;display:inline-block;border:1px dashed var(--acc);padding:5px 14px;font-size:12px">button
+      <span style="position:absolute;width:6px;height:6px;background:var(--acc);top:-3px;left:-3px"></span>
+      <span style="position:absolute;width:6px;height:6px;background:var(--acc);top:-3px;right:-3px"></span>
+      <span style="position:absolute;width:6px;height:6px;background:var(--acc);bottom:-3px;left:-3px"></span>
+      <span style="position:absolute;width:6px;height:6px;background:var(--acc);bottom:-3px;right:-3px"></span>
+    </span>
+  </div>
+</div>
+
+<div class="dv"></div>
+<p class="lbl">// chrome — tiling-wm window (single accent, no stray hues)</p>
+<div class="win" style="max-width:340px">
+  <div class="bar"><span style="color:var(--t)">inspector</span> — button<span class="ctl"><span>■</span><span>✕</span></span></div>
+  <div style="padding:11px 12px;display:grid;grid-template-columns:auto 1fr;gap:6px 18px;align-items:center">
+    <span class="k">LABEL</span><span class="v">Follow up</span>
+    <span class="k">FILL</span><span style="display:flex;gap:6px"><span style="width:15px;height:15px;background:#08080f;border:1px solid var(--line)"></span><span style="width:15px;height:15px;background:#8a8aa4"></span><span style="width:15px;height:15px;background:#f0f0f5"></span><span style="width:15px;height:15px;background:var(--acc);outline:1px solid var(--t)"></span></span>
+    <span class="k">ONCLICK</span><span class="v acc">▸ run agent: linkedin</span>
+  </div>
+</div>
+
+<div class="dv"></div>
+<p class="lbl">// splash — idle state (loud surface, royal-indigo ground)</p>
+<div style="display:flex;gap:20px;align-items:flex-start;border:1px solid rgba(255,255,255,0.22);padding:18px;background:#222290">
+  <pre style="margin:0;font-size:12px;line-height:1.15;color:#fff">▛▀▀▜
+▌
+▌
+▙▄▄▟</pre>
+  <div style="display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:12px">
+    <span class="pix" style="grid-column:1/3;font-size:15px;color:#fff;margin-bottom:6px">conjure</span>
+    <span style="color:#b9b9e6">mods</span><span style="color:#fff">3 (2 active)</span>
+    <span style="color:#b9b9e6">runs</span><span style="color:#fff">1 queued</span>
+    <span style="color:#b9b9e6">scope</span><span style="color:#fff">global</span>
+    <span style="color:#b9b9e6">status</span><span style="color:#fff"><span style="color:#fff">■</span> idle — ready</span>
+    <div style="grid-column:1/3;display:flex;gap:4px;margin-top:8px">
+      <span style="width:18px;height:11px;background:#08080f"></span>
+      <span style="width:18px;height:11px;background:#101026"></span>
+      <span style="width:18px;height:11px;background:#8a8aa4"></span>
+      <span style="width:18px;height:11px;background:#f0f0f5"></span>
+      <span style="width:18px;height:11px;background:#6c6af5"></span>
+    </div>
+  </div>
+</div>
+
+</div>
