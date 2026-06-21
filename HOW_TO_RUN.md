@@ -1,5 +1,10 @@
 # How To Run Conjure
 
+> Once it's running, see **[USING_CONJURE.md](USING_CONJURE.md)** for the
+> everyday flow: where generated code goes, how Conjure auto-applies it to the
+> browser, the one-time "Allow user scripts" toggle, and how session
+> persistence works.
+
 Run these commands from the repo root:
 
 ```powershell
@@ -107,8 +112,12 @@ SENTRY_DSN=
 Redis is optional for first local testing because the store includes an in-memory fallback. For the intended full build (persistent conversations, sandbox cache, job streams), run Redis at:
 
 ```env
-REDIS_URL=redis://localhost:6379/0
+REDIS_URL=redis://127.0.0.1:6379/0
 ```
+
+> On Windows, use `127.0.0.1` rather than `localhost`: the async Redis client
+> resolves `localhost` to IPv6 (`::1`) and times out against the Docker
+> container, which only publishes on IPv4.
 
 ## 9. Run Redis With Docker (recommended, reproducible)
 

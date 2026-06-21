@@ -3,33 +3,51 @@ import {
   AlertTriangle,
   CheckCircle2,
   Circle,
-  Copy,
   ExternalLink,
   Loader2,
   MessageSquareText,
-  PackageCheck,
+  Pencil,
+  Puzzle,
   RefreshCcw,
   Send,
   Terminal,
+  Trash2,
   Wrench,
   XCircle
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createConversationWsUrl, CONJURE_CONFIG } from "../shared/config";
+import {
+  createConversationWsUrl,
+  createModsBundleUrl,
+  createModsUrl,
+  createModUrl,
+  CONJURE_CONFIG
+} from "../shared/config";
 import {
   BACKGROUND_MESSAGE,
   CLIENT_EVENT,
   CONTENT_MESSAGE,
   SERVER_EVENT,
   type ActiveTabSnapshot,
+  type ApplyModsResult,
   type ClientToServerEvent,
   type ConsoleLogEntry,
+  type GeneratedBundle,
   type GetElementHtmlMessage,
   type GetPageContentMessage,
+  type ModRecord,
   type PageContentResult,
   type RuntimeResult,
   type ServerToClientEvent
 } from "../shared/messages";
+
+const SESSION_STORAGE_KEY = "conjure.session";
+
+interface PersistedSession {
+  projectId: string;
+  conversationId?: string;
+  messages: ChatMessage[];
+}
 
 type ConnectionState = "idle" | "connecting" | "connected" | "error";
 type ChatRole = "user" | "assistant" | "system";
@@ -76,9 +94,6 @@ interface SandboxState {
   };
 }
 
-interface InstallState {
-  path: string;
-}
 
 const initSentry = () => {
   if (!CONJURE_CONFIG.sentry.enabled) return;
@@ -219,7 +234,8 @@ export default function App() {
     screenshots: [],
     healing: []
   });
-  const [installReady, setInstallReady] = useState<InstallState>();
+  const [mods, setMods] = useState<ModRecord[]>([]);
+  const [editingMod, setEditingMod] = useState<{ id: string; prompt: string } | null>(null);
   const [rules, setRules] = useState<string[]>([]);
   const [statusText, setStatusText] = useState("Ready");
 
@@ -227,6 +243,92 @@ export default function App() {
   const pendingOpenRef = useRef<Promise<WebSocket> | null>(null);
   const currentAssistantIdRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const hydratedRef = useRef(false);
+  const projectIdRef = useRef(projectId);
+
+  useEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
+
+  const addSystemMessage = useCallback((content: string) => {
+    setMessages((current) => [
+      ...current,
+      { id: makeId(), role: "system", content, createdAt: Date.now() }
+    ]);
+  }, []);
+
+  // Register/refresh every active mod in the browser via the service worker.
+  const applyModBundles = useCallback(
+    async (bundles: GeneratedBundle[]) => {
+      if (!bundles.length) return;
+      setStatusText("Applying mods to browser");
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: BACKGROUND_MESSAGE.APPLY_MODS,
+          bundles
+        });
+        if (isRuntimeOk<ApplyModsResult>(response)) {
+          const { applied, reloaded } = response.data;
+          setStatusText(`Applied ${applied} mod(s)`);
+          if (reloaded > 0) {
+            addSystemMessage(`Applied ${applied} mod(s) and reloaded ${reloaded} matching tab(s).`);
+          }
+          return;
+        }
+        const error = response?.error || "Could not apply mods.";
+        setStatusText("Apply failed");
+        addSystemMessage(error);
+      } catch (error) {
+        setStatusText("Apply failed");
+        addSystemMessage(error instanceof Error ? error.message : String(error));
+      }
+    },
+    [addSystemMessage]
+  );
+
+  // Pull the current mod list + active bundles from the backend and apply them.
+  const refreshAndApplyMods = useCallback(
+    async (targetProjectId: string) => {
+      try {
+        const [listResponse, bundleResponse] = await Promise.all([
+          fetch(createModsUrl(targetProjectId), { cache: "no-store" }),
+          fetch(createModsBundleUrl(targetProjectId), { cache: "no-store" })
+        ]);
+        if (listResponse.ok) {
+          const data = (await listResponse.json()) as { mods?: ModRecord[] };
+          setMods(data.mods || []);
+        }
+        if (bundleResponse.ok) {
+          const data = (await bundleResponse.json()) as { bundles?: GeneratedBundle[] };
+          await applyModBundles(data.bundles || []);
+        }
+      } catch (error) {
+        captureException(error);
+      }
+    },
+    [applyModBundles]
+  );
+
+  const removeMod = useCallback(
+    async (mod: ModRecord) => {
+      setStatusText(`Removing "${mod.name}"`);
+      try {
+        const response = await fetch(createModUrl(projectIdRef.current, mod.id), { method: "DELETE" });
+        if (!response.ok) {
+          throw new Error(`Backend returned ${response.status} removing the mod.`);
+        }
+        const data = (await response.json()) as { mods?: ModRecord[] };
+        setMods(data.mods || []);
+        await chrome.runtime.sendMessage({ type: BACKGROUND_MESSAGE.REMOVE_MOD, modId: mod.id });
+        setStatusText(`Removed "${mod.name}"`);
+        addSystemMessage(`Removed mod "${mod.name}".`);
+      } catch (error) {
+        setStatusText("Remove failed");
+        addSystemMessage(error instanceof Error ? error.message : String(error));
+      }
+    },
+    [addSystemMessage]
+  );
 
   const activeTab = useMemo(() => activeTabs.find((tab) => tab.active) || activeTabs[0], [activeTabs]);
 
@@ -503,9 +605,14 @@ export default function App() {
           }));
           setStatusText("Healing sandbox issue");
           return;
-        case SERVER_EVENT.EXTENSION_READY:
-          setInstallReady({ path: event.path });
-          setStatusText("Extension ready");
+        case SERVER_EVENT.EXTENSION_READY: {
+          const bundles = (event as { bundles?: GeneratedBundle[] }).bundles || [];
+          setStatusText("Applying mods");
+          void applyModBundles(bundles);
+          return;
+        }
+        case SERVER_EVENT.MODS_UPDATED:
+          setMods((event as { mods?: ModRecord[] }).mods || []);
           return;
         case SERVER_EVENT.CONVERSATION_TITLE:
           document.title = `${event.title} - Conjure`;
@@ -536,6 +643,7 @@ export default function App() {
     },
     [
       appendAssistantContent,
+      applyModBundles,
       finalizeAssistant,
       handleRequestConsoleLogs,
       handleRequestTabContent
@@ -587,53 +695,96 @@ export default function App() {
     return pendingOpenRef.current;
   }, [handleServerEvent, projectId]);
 
-  const handleSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    const query = input.trim();
-    if (!query) return;
-
-    setInput("");
-    setInstallReady(undefined);
-    setMessages((current) => [
-      ...current,
-      { id: makeId(), role: "user", content: query, createdAt: Date.now() }
-    ]);
-    currentAssistantIdRef.current = null;
-
-    try {
-      const tabs = await getActiveTabs();
-      const socket = await openSocket();
-      socket.send(
-        JSON.stringify({
-          type: CLIENT_EVENT.CHAT,
-          query,
-          conversation_id: conversationId,
-          active_tabs: tabs
-        } satisfies ClientToServerEvent)
-      );
-      setStatusText("Streaming");
-    } catch (error) {
-      captureException(error);
+  const submitChat = useCallback(
+    async (query: string, modId?: string) => {
+      currentAssistantIdRef.current = null;
       setMessages((current) => [
         ...current,
         {
           id: makeId(),
-          role: "system",
-          content: error instanceof Error ? error.message : String(error),
+          role: "user",
+          content: modId ? `Change mod: ${query}` : query,
           createdAt: Date.now()
         }
       ]);
-    }
+
+      try {
+        const tabs = await getActiveTabs();
+        const socket = await openSocket();
+        socket.send(
+          JSON.stringify({
+            type: CLIENT_EVENT.CHAT,
+            query,
+            conversation_id: conversationId,
+            active_tabs: tabs,
+            ...(modId ? { mod_id: modId } : {})
+          } satisfies ClientToServerEvent)
+        );
+        setStatusText(modId ? "Rebuilding mod" : "Streaming");
+      } catch (error) {
+        captureException(error);
+        addSystemMessage(error instanceof Error ? error.message : String(error));
+      }
+    },
+    [addSystemMessage, conversationId, getActiveTabs, openSocket]
+  );
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    const query = input.trim();
+    if (!query) return;
+    setInput("");
+    await submitChat(query);
   };
 
-  const copyInstallPath = async () => {
-    if (!installReady) return;
-    await navigator.clipboard.writeText(installReady.path);
+  const submitModChange = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!editingMod) return;
+    const prompt = editingMod.prompt.trim();
+    if (!prompt) return;
+    const modId = editingMod.id;
+    setEditingMod(null);
+    await submitChat(prompt, modId);
   };
 
   const refreshTabs = async () => {
     await getActiveTabs();
   };
+
+  // Restore the previous session so closing/reopening the side panel (or a
+  // backend restart) does not wipe the conversation. Runs once before the
+  // persistence effect below is allowed to write.
+  useEffect(() => {
+    let cancelled = false;
+    chrome.storage.local
+      .get(SESSION_STORAGE_KEY)
+      .then((stored) => {
+        if (cancelled) return;
+        const session = stored[SESSION_STORAGE_KEY] as PersistedSession | undefined;
+        if (session) {
+          if (session.projectId) setProjectId(session.projectId);
+          if (session.conversationId) setConversationId(session.conversationId);
+          if (Array.isArray(session.messages) && session.messages.length > 0) {
+            setMessages(session.messages.map((message) => ({ ...message, streaming: false })));
+          }
+        }
+        hydratedRef.current = true;
+      })
+      .catch((error) => {
+        captureException(error);
+        hydratedRef.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persist the session on every change once hydration has completed.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    const session: PersistedSession = { projectId, conversationId, messages };
+    chrome.storage.local.set({ [SESSION_STORAGE_KEY]: session }).catch(captureException);
+  }, [projectId, conversationId, messages]);
 
   useEffect(() => {
     void getActiveTabs();
@@ -641,6 +792,11 @@ export default function App() {
       .sendMessage({ type: BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE })
       .catch(captureException);
   }, [getActiveTabs]);
+
+  // Load the mod list and (re)apply every active mod whenever the project changes.
+  useEffect(() => {
+    void refreshAndApplyMods(projectId);
+  }, [refreshAndApplyMods, projectId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
@@ -812,18 +968,96 @@ export default function App() {
         </div>
       </section>
 
-      {installReady ? (
-        <section className="install-card" aria-label="Install ready">
-          <div>
-            <PackageCheck aria-hidden="true" />
-            <span>Extension ready</span>
-            <code>{installReady.path}</code>
-          </div>
-          <button type="button" title="Copy install path" onClick={copyInstallPath} className="icon-button">
-            <Copy aria-hidden="true" />
+      <section className="panel-section mods-panel" aria-label="Mods">
+        <div className="section-title">
+          <Puzzle aria-hidden="true" />
+          <h2>Mods ({mods.length})</h2>
+          <button
+            type="button"
+            title="Refresh and re-apply mods"
+            onClick={() => void refreshAndApplyMods(projectId)}
+            className="icon-button"
+          >
+            <RefreshCcw aria-hidden="true" />
           </button>
-        </section>
-      ) : null}
+        </div>
+        {mods.length === 0 ? (
+          <p className="empty">No mods yet. Ask Conjure to build one below.</p>
+        ) : (
+          <ul className="mod-list">
+            {mods.map((mod) => {
+              const verified = mod.last_verified;
+              const verdict = verified?.passed
+                ? "verified"
+                : verified
+                  ? "failed"
+                  : "unverified";
+              return (
+                <li key={mod.id} className={`mod-item ${mod.status}`}>
+                  <div className="mod-head">
+                    <strong>{mod.name}</strong>
+                    <span className={`mod-badge ${verdict}`}>{verdict}</span>
+                  </div>
+                  <p className="mod-prompt">{mod.prompt}</p>
+                  {verified?.replay_url ? (
+                    <a
+                      className="replay-link"
+                      href={verified.replay_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <ExternalLink aria-hidden="true" />
+                      Sandbox replay
+                    </a>
+                  ) : null}
+                  {editingMod?.id === mod.id ? (
+                    <form className="mod-edit" onSubmit={submitModChange}>
+                      <textarea
+                        value={editingMod.prompt}
+                        onChange={(event) =>
+                          setEditingMod({ id: mod.id, prompt: event.target.value })
+                        }
+                        rows={2}
+                      />
+                      <div className="mod-edit-actions">
+                        <button type="submit" className="mod-action">
+                          Rebuild
+                        </button>
+                        <button
+                          type="button"
+                          className="mod-action ghost"
+                          onClick={() => setEditingMod(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="mod-actions">
+                      <button
+                        type="button"
+                        className="mod-action"
+                        title="Change the prompt and rebuild this mod"
+                        onClick={() => setEditingMod({ id: mod.id, prompt: mod.prompt })}
+                      >
+                        <Pencil aria-hidden="true" /> Change
+                      </button>
+                      <button
+                        type="button"
+                        className="mod-action danger"
+                        title="Remove this mod"
+                        onClick={() => void removeMod(mod)}
+                      >
+                        <Trash2 aria-hidden="true" /> Remove
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
 
       {rules.length ? (
         <section className="rules-strip" aria-label="Memory rules">

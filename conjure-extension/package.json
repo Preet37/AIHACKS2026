@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@sentry/browser": "^10.56.0",
+    "conjure-workspace": "file:..",
     "lucide-react": "^1.21.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"

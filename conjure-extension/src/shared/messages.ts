@@ -7,7 +7,9 @@ export const CONTENT_MESSAGE = {
 export const BACKGROUND_MESSAGE = {
   GET_ACTIVE_TABS: "conjure:get_active_tabs",
   GET_CONSOLE_LOGS: "conjure:get_console_logs",
-  RELOAD_ALL_TABS_ONCE: "conjure:reload_all_tabs_once"
+  RELOAD_ALL_TABS_ONCE: "conjure:reload_all_tabs_once",
+  APPLY_MODS: "conjure:apply_mods",
+  REMOVE_MOD: "conjure:remove_mod"
 } as const;
 
 export const CLIENT_EVENT = {
@@ -29,6 +31,7 @@ export const SERVER_EVENT = {
   SANDBOX_RESULT: "sandbox_result",
   SANDBOX_HEALING: "sandbox_healing",
   EXTENSION_READY: "extension_ready",
+  MODS_UPDATED: "mods_updated",
   CONVERSATION_TITLE: "conversation_title",
   RULES_UPDATED: "rules_updated",
   DONE: "done",
@@ -117,19 +120,67 @@ export interface ReloadAllTabsOnceMessage {
   type: typeof BACKGROUND_MESSAGE.RELOAD_ALL_TABS_ONCE;
 }
 
+/** One mod's content-script bundle Conjure injects into the browser. */
+export interface GeneratedBundle {
+  mod_id?: string;
+  name: string;
+  matches: string[];
+  run_at: string;
+  js: string;
+  css: string;
+}
+
+/** A mod record as tracked by the backend registry. */
+export interface ModRecord {
+  id: string;
+  name: string;
+  prompt: string;
+  status: "active" | "disabled";
+  created_at?: number;
+  updated_at?: number;
+  last_verified?: {
+    passed: boolean;
+    source?: string;
+    target_url?: string;
+    replay_url?: string;
+    findings?: string[];
+    at?: number;
+  } | null;
+}
+
+export interface ApplyModsMessage {
+  type: typeof BACKGROUND_MESSAGE.APPLY_MODS;
+  bundles: GeneratedBundle[];
+}
+
+export interface RemoveModMessage {
+  type: typeof BACKGROUND_MESSAGE.REMOVE_MOD;
+  modId: string;
+}
+
+export interface ApplyModsResult {
+  applied: number;
+  removed: number;
+  reloaded: number;
+}
+
 export type RuntimeRequest =
   | ContentConsoleEventMessage
   | GetPageContentMessage
   | GetElementHtmlMessage
   | GetActiveTabsMessage
   | GetConsoleLogsMessage
-  | ReloadAllTabsOnceMessage;
+  | ReloadAllTabsOnceMessage
+  | ApplyModsMessage
+  | RemoveModMessage;
 
 export interface ChatClientEvent {
   type: typeof CLIENT_EVENT.CHAT;
   query: string;
   conversation_id?: string;
   active_tabs: ActiveTabSnapshot[];
+  /** When set, this turn edits (re-generates) the named mod. */
+  mod_id?: string;
 }
 
 export interface TabContentResponseClientEvent {
@@ -184,7 +235,17 @@ export type ServerToClientEvent =
   | { type: typeof SERVER_EVENT.SANDBOX_SCREENSHOT; url?: string; data?: string }
   | { type: typeof SERVER_EVENT.SANDBOX_RESULT; passed: boolean; findings?: string[]; replay_url?: string }
   | { type: typeof SERVER_EVENT.SANDBOX_HEALING; iteration: number; fix_summary?: string }
-  | { type: typeof SERVER_EVENT.EXTENSION_READY; path: string }
+  | {
+      type: typeof SERVER_EVENT.EXTENSION_READY;
+      path: string;
+      project_id?: string;
+      bundles?: GeneratedBundle[];
+    }
+  | {
+      type: typeof SERVER_EVENT.MODS_UPDATED;
+      project_id?: string;
+      mods: ModRecord[];
+    }
   | { type: typeof SERVER_EVENT.CONVERSATION_TITLE; title: string }
   | { type: typeof SERVER_EVENT.RULES_UPDATED; rules: string[] }
   | { type: typeof SERVER_EVENT.DONE; conversation_id?: string; content?: string }
