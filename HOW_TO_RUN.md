@@ -240,29 +240,36 @@ docker exec conjure-redis redis-cli keys '*'
 > errors with `docker-credential-desktop ... not found`, run once:
 > `$env:PATH = "$env:ProgramFiles\Docker\Docker\resources\bin;$env:PATH"`.
 
-## 12. "Find On This Page" Button (Orkes AgentSpan)
+## 12. "Find On This Page" Button (off-device: Browserbase + Stagehand)
 
-The side panel has a **Find on this page** box: type something like `jackets under $100`,
-and an [AgentSpan](https://agentspan.ai) agent reads the page you are on and returns
-result cards (image + title + link + price).
+The side panel has a **Find on this page** box: type something like `jackets under $100`.
+The backend spins up an **off-device** [Browserbase](https://www.browserbase.com) cloud
+browser, driven by [Stagehand](https://stagehand.dev), which navigates/scrolls/extracts and
+returns result cards (image + title + link + price) plus a **replay link to watch the run**.
+It is **not** your local browser — your cookies are handed off to the cloud session so it
+browses as the logged-in you.
 
-`docker compose up -d` now starts three containers — Redis, the **AgentSpan server**
-(`agentspan/server:latest` on `http://localhost:6767`, with a dashboard), and the
-Postgres it uses. The AgentSpan **server** makes the LLM call, so Compose passes your
-existing `ANTHROPIC_API_KEY` (from `.env`) into that container. No separate key needed.
-
+Setup:
 ```powershell
-docker compose up -d
-docker compose ps                                  # conjure-agentspan should be "Up"
-Invoke-RestMethod http://localhost:6767/health     # AgentSpan server health (first boot takes ~30-60s)
+# 1. backend deps include `stagehand` and `playwright`:
+python -m pip install -r .\backend\requirements.txt
+# 2. set in .env (Browserbase keys + the LLM key Stagehand uses):
+#    BROWSERBASE_API_KEY=...   BROWSERBASE_PROJECT_ID=...   ANTHROPIC_API_KEY=...
+#    optional: BROWSE_MODEL=anthropic/claude-sonnet-4-6  BROWSE_MAX_RESULTS=6  BROWSE_MAX_STEPS=6
 ```
 
-The Python `agentspan` SDK in the backend (installed via `backend/requirements.txt`)
-talks to that server using `AGENTSPAN_SERVER_URL=http://localhost:6767/api` from `.env`.
-Change the model with `AGENTSPAN_LLM_MODEL` (default `anthropic/claude-sonnet-4-6`).
+No Docker needed for this feature — Browserbase is a cloud service. (Redis/AgentSpan
+containers from `docker compose up -d` are unrelated to the finder now.)
+
+Flow + contract:
+- The extension sends `POST /projects/{id}/agent-task` with `{task, url, cookies}` (the
+  current tab URL + `chrome.cookies` for that URL).
+- Response: `{findings:[{title,url,image,price,note}], session_id, replay_url}`.
+- Watch the run live/after at `replay_url` (a `browserbase.com/sessions/...` link).
 
 Notes:
-- The server is a JVM app + Postgres, so the first `up` pulls a large image and needs
-  ~1.5 GB RAM. Give Docker Desktop enough memory.
-- The button hits `POST /projects/{id}/agent-task`. If the server is down or the key is
-  missing, the side panel shows a clear error (503/502) instead of failing silently.
+- Public pages (e.g. an Amazon jacket search) work without login. Aggressively
+  bot-defended sites may challenge a new cloud IP even with cookies handed off.
+- If Browserbase/LLM keys are missing the panel shows a clear 503; a run failure shows 502.
+- `backend/utils/agentspan_finder.py` + the AgentSpan Docker server remain as an alternate
+  finder engine that runs an LLM over posted page HTML (not off-device).

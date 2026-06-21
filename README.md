@@ -29,7 +29,8 @@ Required config groups:
 - Devin: `DEVIN_API_KEY`, `DEVIN_ORG_ID`, API base URL, agent mode, repositories, branch, and polling settings
 - Claude: `ANTHROPIC_API_KEY` and `CONJURE_ANTHROPIC_MODEL`
 - Nemotron: `NVIDIA_API_KEY`, `NVIDIA_MODEL`, and optional `NVIDIA_API_BASE_URL` for self-hosted NIM
-- Orkes AgentSpan: powers the side-panel "Find on this page" button. Run the runtime with `agentspan server start` (serves `http://localhost:6767`), set `AGENTSPAN_SERVER_URL`, `AGENTSPAN_LLM_MODEL` (e.g. `anthropic/claude-sonnet-4-6`), and `AGENTSPAN_MAX_RESULTS`. The agent uses the model's provider key (`ANTHROPIC_API_KEY` for an `anthropic/` model)
+- Off-device finder (side-panel "Find on this page"): runs a Browserbase cloud browser driven by Stagehand. Needs `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, `ANTHROPIC_API_KEY` (the LLM key Stagehand uses), and optional `BROWSE_MODEL` (default `anthropic/claude-sonnet-4-6`), `BROWSE_MAX_RESULTS`, `BROWSE_MAX_STEPS`. Install the SDK via `backend/requirements.txt` (`stagehand`)
+- Orkes AgentSpan (alternate finder engine, over posted HTML): `agentspan server start` (serves `http://localhost:6767`), `AGENTSPAN_SERVER_URL`, `AGENTSPAN_LLM_MODEL`, `AGENTSPAN_MAX_RESULTS`
 - Redis: `REDIS_URL`, `REDIS_NAMESPACE`, sandbox cache TTL
 - Browserbase: API key, project ID, session settings
 - Simular: API key and optional endpoint/model override
@@ -101,4 +102,4 @@ When backend and extension implementations arrive, add focused tests under `test
 - Simular owns autonomous functional, crash, and security passes against the Browserbase session.
 - Sentry should use separate environments or projects for backend, extension, and sandbox crashes.
 - Generated extension artifacts belong in `demo_code/` and are ignored by Git.
-- The side-panel "Find on this page" button scrapes the active tab and posts it to `POST /projects/{id}/agent-task`, which runs an Orkes AgentSpan agent over the page and returns matching items (title, image, link, price) as result cards. Requires a running AgentSpan server (`agentspan server start`) and the model's provider key; there is no demo fallback.
+- The side-panel "Find on this page" button sends the current tab URL plus the user's cookies to `POST /projects/{id}/agent-task`. The backend spins up an **off-device** Browserbase cloud browser (driven by Stagehand), hands off the cookies so it browses as the logged-in user, navigates/scrolls/extracts matching items (title, image, link, price), and returns them as result cards plus a `replay_url` to watch the run. Requires Browserbase + the LLM key; there is no demo fallback. `backend/utils/agentspan_finder.py` remains as an alternate engine that runs over posted HTML.

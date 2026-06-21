@@ -51,7 +51,20 @@ title link + price + note) come back, plus a **replay link to watch it**.
   (`Browserbase(api_key)` → `sessions.create(project_id)` → playwright
   `connect_over_cdp(connect_url)` → screenshot + `replay_url`).
 
-## BUILD PLAN / TODO (off-device pivot)
+## STATUS (off-device pivot)
+- ✅ Backend DONE + proven live: `backend/utils/browser_agent.py` (Stagehand v3 +
+  Browserbase cloud browser, cookie hand-off, navigate/extract + execute fallback,
+  normalize, `replay_url`). Live test on `books.toscrape.com` returned 6 items + replay URL.
+- ✅ `POST /agent-task` now takes `{task,url,cookies}` → `{findings,session_id,replay_url}`.
+- ✅ `config.py` browse settings; `requirements.txt` has `stagehand`/`agentspan`.
+- ✅ Tests: `test_browser_agent.py` + rewritten `test_agent_task_endpoint.py` → **64 pass**.
+- ✅ Docs: README / HOW_TO_RUN §12 / `.env.example` updated to off-device.
+- ✅ Branch pushed to origin; `DELEGATED.md` = extension track for the parallel agent.
+- ⏳ REMAINING: the **extension** (DELEGATED.md) — cookies permission, send `{task,url,cookies}`,
+  render replay link. Then full E2E (extension → backend → Browserbase) + commit.
+- Note: `agentspan_finder.py` kept as an alternate engine (no longer wired to the endpoint).
+
+## BUILD PLAN / TODO (history — mostly done, see STATUS)
 1. `pip install stagehand` in `.venv`; add `stagehand` to `backend/requirements.txt`.
 2. **`backend/utils/browser_agent.py`** (new, async):
    - `BrowserAgentSettings(browserbase_api_key, browserbase_project_id, model, model_api_key, max_results)`.
