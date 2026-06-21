@@ -1,7 +1,10 @@
 export const CONTENT_MESSAGE = {
   CONSOLE_EVENT: "conjure:console_event",
   GET_PAGE_CONTENT: "conjure:get_page_content",
-  GET_ELEMENT_HTML: "conjure:get_element_html"
+  GET_ELEMENT_HTML: "conjure:get_element_html",
+  VISUAL_EDIT_SELECTION: "conjure:visual_edit_selection",
+  VISUAL_EDIT_PREVIEW: "conjure:visual_edit_preview",
+  VISUAL_EDIT_COMMIT: "conjure:visual_edit_commit"
 } as const;
 
 export const BACKGROUND_MESSAGE = {
@@ -9,7 +12,12 @@ export const BACKGROUND_MESSAGE = {
   GET_CONSOLE_LOGS: "conjure:get_console_logs",
   RELOAD_ALL_TABS_ONCE: "conjure:reload_all_tabs_once",
   APPLY_MODS: "conjure:apply_mods",
-  REMOVE_MOD: "conjure:remove_mod"
+  REMOVE_MOD: "conjure:remove_mod",
+  START_VISUAL_EDIT: "conjure:start_visual_edit",
+  STOP_VISUAL_EDIT: "conjure:stop_visual_edit",
+  APPLY_VISUAL_EDIT: "conjure:apply_visual_edit",
+  COMMIT_VISUAL_EDITS: "conjure:commit_visual_edits",
+  DISCARD_VISUAL_EDITS: "conjure:discard_visual_edits"
 } as const;
 
 export const CLIENT_EVENT = {
@@ -70,6 +78,118 @@ export interface PageContentResult {
   html: string;
   selector?: string;
   truncated: boolean;
+}
+
+export type VisualEditOperationType = "setText" | "setStyle" | "hide" | "setBox";
+
+export interface VisualEditRect {
+  x: number;
+  y: number;
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+export interface VisualEditComputedStyle {
+  color: string;
+  backgroundColor: string;
+  fontSize: string;
+  fontWeight: string;
+  lineHeight: string;
+  padding: string;
+  margin: string;
+  borderRadius: string;
+  display: string;
+  position: string;
+  width: string;
+  height: string;
+  transform: string;
+  opacity: string;
+}
+
+export interface VisualEditSelection {
+  selector: string;
+  text: string;
+  tag: string;
+  attributes: Record<string, string>;
+  computedStyle: VisualEditComputedStyle;
+  rect: VisualEditRect;
+  url: string;
+  editable: boolean;
+  notEditableReason?: string;
+  ownership: {
+    conjureOwned: boolean;
+    modId?: string;
+    hints: string[];
+  };
+}
+
+export type VisualEditOperation =
+  | {
+      id: string;
+      type: "setText";
+      selector: string;
+      value: string;
+      url?: string;
+      stale?: boolean;
+    }
+  | {
+      id: string;
+      type: "setStyle";
+      selector: string;
+      styles: Partial<
+        Pick<
+          VisualEditComputedStyle,
+          "color" | "backgroundColor" | "fontSize" | "padding" | "margin" | "borderRadius" | "opacity"
+        >
+      >;
+      url?: string;
+      stale?: boolean;
+    }
+  | {
+      id: string;
+      type: "hide";
+      selector: string;
+      hidden: boolean;
+      url?: string;
+      stale?: boolean;
+    }
+  | {
+      id: string;
+      type: "setBox";
+      selector: string;
+      box: {
+        x?: number;
+        y?: number;
+        width?: number;
+        height?: number;
+        fontScale?: number;
+        sizing?: {
+          width?: "fixed" | "hug";
+          height?: "fixed" | "hug";
+        };
+        hug?: {
+          left?: number;
+          right?: number;
+          top?: number;
+          bottom?: number;
+        };
+      };
+      url?: string;
+      stale?: boolean;
+    };
+
+export interface VisualEditSessionState {
+  active: boolean;
+  modId?: string;
+  selected?: VisualEditSelection;
+  operations: VisualEditOperation[];
+  undoDepth: number;
+  redoDepth: number;
+  staleOperationIds: string[];
 }
 
 export interface RuntimeOk<T> {
@@ -137,6 +257,7 @@ export interface ModRecord {
   name: string;
   prompt: string;
   status: "active" | "disabled";
+  visual_edits?: VisualEditOperation[];
   created_at?: number;
   updated_at?: number;
   last_verified?: {
@@ -159,6 +280,60 @@ export interface RemoveModMessage {
   modId: string;
 }
 
+export interface StartVisualEditMessage {
+  type: typeof BACKGROUND_MESSAGE.START_VISUAL_EDIT;
+  tabId?: number;
+  modId?: string;
+  visualEdits?: VisualEditOperation[];
+}
+
+export interface StopVisualEditMessage {
+  type: typeof BACKGROUND_MESSAGE.STOP_VISUAL_EDIT;
+  tabId?: number;
+}
+
+export interface ApplyVisualEditMessage {
+  type: typeof BACKGROUND_MESSAGE.APPLY_VISUAL_EDIT;
+  tabId?: number;
+  operation: VisualEditOperation;
+}
+
+export interface CommitVisualEditsMessage {
+  type: typeof BACKGROUND_MESSAGE.COMMIT_VISUAL_EDITS;
+  tabId?: number;
+  operations: VisualEditOperation[];
+}
+
+export interface DiscardVisualEditsMessage {
+  type: typeof BACKGROUND_MESSAGE.DISCARD_VISUAL_EDITS;
+  tabId?: number;
+}
+
+export interface VisualEditSelectionMessage {
+  type: typeof CONTENT_MESSAGE.VISUAL_EDIT_SELECTION;
+  payload: VisualEditSelection;
+}
+
+export interface VisualEditPreviewMessage {
+  type: typeof CONTENT_MESSAGE.VISUAL_EDIT_PREVIEW;
+  payload: {
+    ok: boolean;
+    operation?: VisualEditOperation;
+    staleOperationIds?: string[];
+    error?: string;
+  };
+}
+
+export interface VisualEditCommitMessage {
+  type: typeof CONTENT_MESSAGE.VISUAL_EDIT_COMMIT;
+  payload: {
+    ok: boolean;
+    operations: VisualEditOperation[];
+    staleOperationIds?: string[];
+    error?: string;
+  };
+}
+
 export interface ApplyModsResult {
   applied: number;
   removed: number;
@@ -167,13 +342,21 @@ export interface ApplyModsResult {
 
 export type RuntimeRequest =
   | ContentConsoleEventMessage
+  | VisualEditSelectionMessage
+  | VisualEditPreviewMessage
+  | VisualEditCommitMessage
   | GetPageContentMessage
   | GetElementHtmlMessage
   | GetActiveTabsMessage
   | GetConsoleLogsMessage
   | ReloadAllTabsOnceMessage
   | ApplyModsMessage
-  | RemoveModMessage;
+  | RemoveModMessage
+  | StartVisualEditMessage
+  | StopVisualEditMessage
+  | ApplyVisualEditMessage
+  | CommitVisualEditsMessage
+  | DiscardVisualEditsMessage;
 
 export interface ChatClientEvent {
   type: typeof CLIENT_EVENT.CHAT;

@@ -25,6 +25,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -35,7 +36,7 @@ button {
 
 .shell {
   display: grid;
-  grid-template-rows: auto auto auto minmax(180px, 1fr) auto auto auto auto;
+  grid-template-rows: auto auto auto minmax(120px, 1fr) auto auto auto auto auto;
   gap: 10px;
   width: 100%;
   height: 100vh;
@@ -197,6 +198,17 @@ h2 {
 .icon-button:hover,
 .send-button:hover {
   background: #dceadd;
+}
+
+.icon-button.active {
+  color: #fff;
+  background: #245a4b;
+}
+
+.icon-button:disabled,
+.mod-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
 }
 
 .tabs-strip,
@@ -654,4 +666,202 @@ h2 {
   padding: 8px;
   font: inherit;
   margin-bottom: 8px;
+}
+
+/* Visual editor */
+.visual-editor-panel {
+  min-height: 0;
+  max-height: min(460px, 48vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.visual-editor-panel .section-title .icon-button {
+  margin-left: auto;
+}
+
+.visual-editor-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.visual-editor-toolbar select,
+.visual-field input,
+.visual-field textarea {
+  min-width: 0;
+  border: 1px solid #d9ded2;
+  border-radius: 8px;
+  color: #18201c;
+  background: #fbfcf8;
+  outline: none;
+}
+
+.visual-editor-toolbar select {
+  height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.visual-edit-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  color: #607066;
+  background: #eef2e7;
+  font-size: 11px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.visual-edit-pill.active {
+  color: #0d6b4e;
+  background: #e5f6ed;
+}
+
+.visual-stale {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: #9d5a10;
+  background: #fff3d8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.visual-stale svg {
+  width: 14px;
+  height: 14px;
+}
+
+.visual-selection {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #d9e3dc;
+  border-radius: 8px;
+  background: #fbfcf8;
+}
+
+.visual-selection-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #24463d;
+  font-size: 12px;
+}
+
+.visual-selection-head span,
+.visual-selection p {
+  color: #607066;
+  font-size: 11px;
+}
+
+.visual-selection code {
+  min-width: 0;
+  overflow: hidden;
+  color: #48574e;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visual-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.visual-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.visual-field-full {
+  grid-column: 1 / -1;
+}
+
+.visual-field span,
+.visual-toggle span {
+  color: #48574e;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.visual-field input {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.visual-field input[type="color"] {
+  padding: 2px;
+}
+
+.visual-field textarea {
+  width: 100%;
+  min-height: 54px;
+  max-height: 90px;
+  padding: 7px 8px;
+  resize: vertical;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.color-field {
+  grid-template-columns: minmax(0, 1fr) 38px;
+  align-items: end;
+}
+
+.color-field span {
+  grid-column: 1 / -1;
+}
+
+.visual-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid #d9ded2;
+  border-radius: 8px;
+  background: #fbfcf8;
+}
+
+.visual-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.visual-toggle svg {
+  width: 14px;
+  height: 14px;
+  color: #607066;
+}
+
+.visual-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+}
+
+.visual-editor-actions .icon-button {
+  width: 32px;
+  height: 32px;
 }

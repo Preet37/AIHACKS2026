@@ -6,14 +6,19 @@ import {
   type ActiveTabSnapshot,
   type ApplyModsMessage,
   type ApplyModsResult,
+  type ApplyVisualEditMessage,
+  type CommitVisualEditsMessage,
   type ConsoleLogEntry,
   type ConsoleLevel,
   type ContentConsoleEventMessage,
+  type DiscardVisualEditsMessage,
   type GeneratedBundle,
   type GetConsoleLogsMessage,
   type RemoveModMessage,
   type RuntimeRequest,
-  type RuntimeResult
+  type RuntimeResult,
+  type StartVisualEditMessage,
+  type StopVisualEditMessage
 } from "./shared/messages";
 
 const RELOAD_KEY = "conjure.tabsReloadedForContentHooks";
@@ -49,6 +54,7 @@ const userScriptsUnavailableError =
 const buildUserScriptCode = (bundle: GeneratedBundle, scriptId: string): string => {
   const cssLiteral = JSON.stringify(bundle.css || "");
   const idLiteral = JSON.stringify(scriptId);
+  const modIdLiteral = JSON.stringify(bundle.mod_id || scriptId);
   return [
     "(function () {",
     `  var __conjureCss = ${cssLiteral};`,
@@ -62,7 +68,89 @@ const buildUserScriptCode = (bundle: GeneratedBundle, scriptId: string): string 
     "    }",
     "  }",
     "})();",
-    bundle.js || ""
+    "(function () {",
+    `  var __conjureModId = ${modIdLiteral};`,
+    "  var __conjureCounter = 0;",
+    "  var __originalCreateElement = document.createElement.bind(document);",
+    "  var __originalCreateElementNS = document.createElementNS.bind(document);",
+    "  var __tagNode = function (node) {",
+    "    try {",
+    "      if (!__conjureModId || !node) return node;",
+    "      var nodes = [];",
+    "      if (node.nodeType === 1) nodes.push(node);",
+    "      if (node.nodeType === 11 || node.nodeType === 1) {",
+    "        var children = node.querySelectorAll ? node.querySelectorAll('*') : [];",
+    "        for (var index = 0; index < children.length; index += 1) nodes.push(children[index]);",
+    "      }",
+    "      for (var itemIndex = 0; itemIndex < nodes.length; itemIndex += 1) {",
+    "        var element = nodes[itemIndex];",
+    "        if (!element.setAttribute) continue;",
+    "        if (!element.hasAttribute('data-conjure-mod-id')) {",
+    "          element.setAttribute('data-conjure-mod-id', __conjureModId);",
+    "        }",
+    "        if (!element.hasAttribute('data-conjure-owned')) {",
+    "          element.setAttribute('data-conjure-owned', 'true');",
+    "        }",
+    "        if (!element.hasAttribute('data-conjure-element-id')) {",
+    "          __conjureCounter += 1;",
+    "          element.setAttribute('data-conjure-element-id', __conjureModId + '-' + __conjureCounter);",
+    "        }",
+    "      }",
+    "    } catch (_error) {",
+    "      return node;",
+    "    }",
+    "    return node;",
+    "  };",
+    "  window.__CONJURE_TAG_DOM_NODE__ = __tagNode;",
+    "  window.__CONJURE_INSTALL_DOM_TAG_OBSERVER__ = function () {",
+    "    if (typeof MutationObserver === 'undefined') return;",
+    "    var root = document.documentElement || document.body;",
+    "    if (!root) return;",
+    "    var observer = new MutationObserver(function (mutations) {",
+    "      for (var mutationIndex = 0; mutationIndex < mutations.length; mutationIndex += 1) {",
+    "        var mutation = mutations[mutationIndex];",
+    "        var target = mutation.target;",
+    "        var ownedTarget = target && target.closest ? target.closest('[data-conjure-mod-id=\"' + __conjureModId + '\"]') : null;",
+    "        if (!ownedTarget) continue;",
+    "        for (var nodeIndex = 0; nodeIndex < mutation.addedNodes.length; nodeIndex += 1) {",
+    "          __tagNode(mutation.addedNodes[nodeIndex]);",
+    "        }",
+    "      }",
+    "    });",
+    "    observer.observe(root, { childList: true, subtree: true });",
+    "  };",
+    "  document.createElement = function () {",
+    "    return __tagNode(__originalCreateElement.apply(document, arguments));",
+    "  };",
+    "  document.createElementNS = function () {",
+    "    return __tagNode(__originalCreateElementNS.apply(document, arguments));",
+    "  };",
+    "  window.__CONJURE_RESTORE_DOM_TAGGING__ = function () {",
+    "    document.createElement = __originalCreateElement;",
+    "    document.createElementNS = __originalCreateElementNS;",
+    "    delete window.__CONJURE_RESTORE_DOM_TAGGING__;",
+    "    delete window.__CONJURE_TAG_DOM_NODE__;",
+    "    delete window.__CONJURE_INSTALL_DOM_TAG_OBSERVER__;",
+    "  };",
+    "  window.setTimeout(function () {",
+    "    if (window.__CONJURE_RESTORE_DOM_TAGGING__) window.__CONJURE_RESTORE_DOM_TAGGING__();",
+    "  }, 1000);",
+    "})();",
+    bundle.js || "",
+    "(function () {",
+    `  var __conjureModId = ${modIdLiteral};`,
+    "  var __tagNode = window.__CONJURE_TAG_DOM_NODE__;",
+    "  if (__tagNode) {",
+    "    var __owned = document.querySelectorAll('[data-conjure-mod-id]');",
+    "    for (var __index = 0; __index < __owned.length; __index += 1) {",
+    "      if (__owned[__index].getAttribute('data-conjure-mod-id') === __conjureModId) {",
+    "        __tagNode(__owned[__index]);",
+    "      }",
+    "    }",
+    "  }",
+    "  if (window.__CONJURE_INSTALL_DOM_TAG_OBSERVER__) window.__CONJURE_INSTALL_DOM_TAG_OBSERVER__();",
+    "  if (window.__CONJURE_RESTORE_DOM_TAGGING__) window.__CONJURE_RESTORE_DOM_TAGGING__();",
+    "})();"
   ].join("\n");
 };
 
@@ -269,6 +357,34 @@ const getActiveTabs = async (): Promise<RuntimeResult<ActiveTabSnapshot[]>> => {
   };
 };
 
+type VisualEditForwardMessage =
+  | StartVisualEditMessage
+  | StopVisualEditMessage
+  | ApplyVisualEditMessage
+  | CommitVisualEditsMessage
+  | DiscardVisualEditsMessage;
+
+const activeTabId = async (): Promise<number | undefined> => {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tabs.find((tab) => typeof tab.id === "number")?.id;
+};
+
+const forwardVisualEditMessage = async (
+  message: VisualEditForwardMessage
+): Promise<RuntimeResult<unknown>> => {
+  const tabId = message.tabId ?? (await activeTabId());
+  if (typeof tabId !== "number") {
+    return { ok: false, error: "No active tab available for visual editing." };
+  }
+
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, message);
+    return response || { ok: true, data: null };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+};
+
 const reloadAllTabsOnce = async (): Promise<RuntimeResult<{ reloaded: boolean; count: number }>> => {
   const stored = await chrome.storage.local.get(RELOAD_KEY);
   if (stored[RELOAD_KEY]) {
@@ -293,6 +409,10 @@ const handleRuntimeMessage = async (
   switch (message.type) {
     case CONTENT_MESSAGE.CONSOLE_EVENT:
       return appendConsoleLog(message, sender);
+    case CONTENT_MESSAGE.VISUAL_EDIT_SELECTION:
+    case CONTENT_MESSAGE.VISUAL_EDIT_PREVIEW:
+    case CONTENT_MESSAGE.VISUAL_EDIT_COMMIT:
+      return { ok: true, data: null };
     case BACKGROUND_MESSAGE.GET_CONSOLE_LOGS:
       return getConsoleLogs(message);
     case BACKGROUND_MESSAGE.GET_ACTIVE_TABS:
@@ -303,6 +423,12 @@ const handleRuntimeMessage = async (
       return applyMods(message as ApplyModsMessage);
     case BACKGROUND_MESSAGE.REMOVE_MOD:
       return removeMod(message as RemoveModMessage);
+    case BACKGROUND_MESSAGE.START_VISUAL_EDIT:
+    case BACKGROUND_MESSAGE.STOP_VISUAL_EDIT:
+    case BACKGROUND_MESSAGE.APPLY_VISUAL_EDIT:
+    case BACKGROUND_MESSAGE.COMMIT_VISUAL_EDITS:
+    case BACKGROUND_MESSAGE.DISCARD_VISUAL_EDITS:
+      return forwardVisualEditMessage(message as VisualEditForwardMessage);
     default:
       return { ok: false, error: "Unsupported runtime message." };
   }

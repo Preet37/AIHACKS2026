@@ -3,15 +3,21 @@ import {
   AlertTriangle,
   CheckCircle2,
   Circle,
+  EyeOff,
   ExternalLink,
   Loader2,
   MessageSquareText,
+  MousePointer2,
   Pencil,
   Puzzle,
   RefreshCcw,
+  Redo2,
+  Save,
   Send,
+  SlidersHorizontal,
   Terminal,
   Trash2,
+  Undo2,
   XCircle
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -38,7 +44,11 @@ import {
   type GetPageContentMessage,
   type ModRecord,
   type PageContentResult,
+  type RuntimeRequest,
   type RuntimeResult,
+  type VisualEditOperation,
+  type VisualEditSelection,
+  type VisualEditSessionState,
   type ServerToClientEvent
 } from "../shared/messages";
 
@@ -80,6 +90,35 @@ interface AgentRunState {
   pullRequests: AgentPullRequest[];
 }
 
+interface VisualEditDraft {
+  text: string;
+  color: string;
+  backgroundColor: string;
+  fontSize: string;
+  padding: string;
+  margin: string;
+  borderRadius: string;
+  hidden: boolean;
+  x: string;
+  y: string;
+  width: string;
+  height: string;
+}
+
+const emptyVisualEditDraft: VisualEditDraft = {
+  text: "",
+  color: "#18201c",
+  backgroundColor: "#ffffff",
+  fontSize: "",
+  padding: "",
+  margin: "",
+  borderRadius: "",
+  hidden: false,
+  x: "0",
+  y: "0",
+  width: "",
+  height: ""
+};
 
 const initSentry = () => {
   if (!CONJURE_CONFIG.sentry.enabled) return;
@@ -200,6 +239,62 @@ const formatTime = (timestamp: number) =>
     minute: "2-digit"
   }).format(timestamp);
 
+const replaceVisualOperation = (operations: VisualEditOperation[], operation: VisualEditOperation) => [
+  ...operations.filter((candidate) => candidate.id !== operation.id),
+  operation
+];
+
+const visualOperationId = (selection: VisualEditSelection, type: VisualEditOperation["type"]) =>
+  `${type}:${selection.selector}`;
+
+const parseCssNumber = (value: string | undefined) => {
+  if (!value) return "";
+  const number = Number.parseFloat(value);
+  return Number.isFinite(number) ? String(Math.round(number)) : "";
+};
+
+const numericCssValue = (value: string) => {
+  const number = Number.parseFloat(value);
+  return Number.isFinite(number) ? `${number}px` : "";
+};
+
+const finiteNumber = (value: string) => {
+  const number = Number.parseFloat(value);
+  return Number.isFinite(number) ? number : undefined;
+};
+
+const draftBoxValue = (value: number | undefined, fallback: string) =>
+  typeof value === "number" && Number.isFinite(value) ? String(Math.round(value)) : fallback;
+
+const colorToHex = (value: string | undefined, fallback: string) => {
+  if (!value) return fallback;
+  if (/^#[0-9a-f]{6}$/i.test(value.trim())) return value.trim();
+  const match = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  if (!match) return fallback;
+  return [match[1], match[2], match[3]]
+    .map((part) => Math.max(0, Math.min(255, Number(part))).toString(16).padStart(2, "0"))
+    .join("")
+    .replace(/^/, "#");
+};
+
+const visualDraftFromSelection = (selection: VisualEditSelection): VisualEditDraft => ({
+  text: selection.text,
+  color: colorToHex(selection.computedStyle.color, emptyVisualEditDraft.color),
+  backgroundColor: colorToHex(
+    selection.computedStyle.backgroundColor,
+    emptyVisualEditDraft.backgroundColor
+  ),
+  fontSize: parseCssNumber(selection.computedStyle.fontSize),
+  padding: parseCssNumber(selection.computedStyle.padding),
+  margin: parseCssNumber(selection.computedStyle.margin),
+  borderRadius: parseCssNumber(selection.computedStyle.borderRadius),
+  hidden: selection.computedStyle.display === "none",
+  x: "0",
+  y: "0",
+  width: String(Math.round(selection.rect.width)),
+  height: String(Math.round(selection.rect.height))
+});
+
 export default function App() {
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const [projectId, setProjectId] = useState(CONJURE_CONFIG.projectId);
@@ -221,6 +316,17 @@ export default function App() {
   });
   const [mods, setMods] = useState<ModRecord[]>([]);
   const [editingMod, setEditingMod] = useState<{ id: string; prompt: string } | null>(null);
+  const [visualEditModId, setVisualEditModId] = useState("");
+  const [visualEditSession, setVisualEditSession] = useState<VisualEditSessionState>({
+    active: false,
+    operations: [],
+    undoDepth: 0,
+    redoDepth: 0,
+    staleOperationIds: []
+  });
+  const [visualEditDraft, setVisualEditDraft] = useState<VisualEditDraft>(emptyVisualEditDraft);
+  const [visualEditPast, setVisualEditPast] = useState<VisualEditOperation[][]>([]);
+  const [visualEditFuture, setVisualEditFuture] = useState<VisualEditOperation[][]>([]);
   const [tools, setTools] = useState<ToolRun[]>([]);
   const [rules, setRules] = useState<string[]>([]);
   const [statusText, setStatusText] = useState("Ready");
@@ -317,6 +423,11 @@ export default function App() {
   );
 
   const activeTab = useMemo(() => activeTabs.find((tab) => tab.active) || activeTabs[0], [activeTabs]);
+  const visualEditMod = useMemo(
+    () => mods.find((mod) => mod.id === visualEditModId) || mods[0],
+    [mods, visualEditModId]
+  );
+  const selectedVisualEdit = visualEditSession.selected;
 
   const sendToServer = useCallback((payload: ClientToServerEvent) => {
     const socket = socketRef.current;
@@ -376,6 +487,350 @@ export default function App() {
 
     return [];
   }, []);
+
+  const sendVisualEditCommand = useCallback(async <T,>(message: RuntimeRequest): Promise<T> => {
+    const response = await chrome.runtime.sendMessage(message);
+    if (isRuntimeOk<T>(response)) return response.data;
+    throw new Error(response?.error || "Visual edit command failed.");
+  }, []);
+
+  const previewVisualOperations = useCallback(
+    async (operations: VisualEditOperation[]) => {
+      if (!activeTab?.id) return;
+      const staleOperationIds = new Set<string>();
+      await sendVisualEditCommand({
+        type: BACKGROUND_MESSAGE.DISCARD_VISUAL_EDITS,
+        tabId: activeTab.id
+      });
+      for (const operation of operations) {
+        const data = await sendVisualEditCommand<{ staleOperationIds?: string[] }>({
+          type: BACKGROUND_MESSAGE.APPLY_VISUAL_EDIT,
+          tabId: activeTab.id,
+          operation
+        });
+        (data.staleOperationIds || []).forEach((id) => staleOperationIds.add(id));
+      }
+      setVisualEditSession((current) => ({
+        ...current,
+        staleOperationIds: Array.from(staleOperationIds)
+      }));
+    },
+    [activeTab?.id, sendVisualEditCommand]
+  );
+
+  const startVisualEdit = useCallback(async () => {
+    if (!activeTab?.id) {
+      addSystemMessage("No active tab available for visual editing.");
+      return;
+    }
+    if (!visualEditMod) {
+      addSystemMessage("Create a mod before starting visual edit mode.");
+      return;
+    }
+
+    const operations = [...(visualEditMod.visual_edits || [])];
+    setStatusText("Starting visual edit");
+    try {
+      const data = await sendVisualEditCommand<{ staleOperationIds?: string[] }>({
+        type: BACKGROUND_MESSAGE.START_VISUAL_EDIT,
+        tabId: activeTab.id,
+        modId: visualEditMod.id,
+        visualEdits: operations
+      });
+      setVisualEditPast([]);
+      setVisualEditFuture([]);
+      setVisualEditSession({
+        active: true,
+        modId: visualEditMod.id,
+        operations,
+        undoDepth: 0,
+        redoDepth: 0,
+        staleOperationIds: data.staleOperationIds || []
+      });
+      setStatusText("Visual edit active");
+    } catch (error) {
+      setStatusText("Visual edit failed");
+      addSystemMessage(error instanceof Error ? error.message : String(error));
+    }
+  }, [activeTab?.id, addSystemMessage, sendVisualEditCommand, visualEditMod]);
+
+  const stopVisualEdit = useCallback(async () => {
+    if (activeTab?.id) {
+      try {
+        await sendVisualEditCommand({
+          type: BACKGROUND_MESSAGE.STOP_VISUAL_EDIT,
+          tabId: activeTab.id
+        });
+      } catch (error) {
+        captureException(error);
+      }
+    }
+    setVisualEditSession((current) => ({ ...current, active: false, selected: undefined }));
+    setStatusText("Visual edit stopped");
+  }, [activeTab?.id, sendVisualEditCommand]);
+
+  const toggleVisualEdit = useCallback(async () => {
+    if (visualEditSession.active) {
+      await stopVisualEdit();
+      return;
+    }
+    await startVisualEdit();
+  }, [startVisualEdit, stopVisualEdit, visualEditSession.active]);
+
+  const pushVisualOperation = useCallback(
+    async (operation: VisualEditOperation) => {
+      if (!activeTab?.id || !visualEditSession.active) return;
+      const currentOperations = visualEditSession.operations;
+      const nextOperations = replaceVisualOperation(currentOperations, operation);
+      const nextPast = [...visualEditPast, currentOperations].slice(-30);
+      setVisualEditPast(nextPast);
+      setVisualEditFuture([]);
+      setVisualEditSession((current) => ({
+        ...current,
+        operations: nextOperations,
+        undoDepth: nextPast.length,
+        redoDepth: 0
+      }));
+
+      try {
+        const data = await sendVisualEditCommand<{ staleOperationIds?: string[] }>({
+          type: BACKGROUND_MESSAGE.APPLY_VISUAL_EDIT,
+          tabId: activeTab.id,
+          operation
+        });
+        setVisualEditSession((current) => ({
+          ...current,
+          staleOperationIds: data.staleOperationIds || []
+        }));
+      } catch (error) {
+        addSystemMessage(error instanceof Error ? error.message : String(error));
+      }
+    },
+    [
+      activeTab?.id,
+      addSystemMessage,
+      sendVisualEditCommand,
+      visualEditPast,
+      visualEditSession.active,
+      visualEditSession.operations
+    ]
+  );
+
+  const updateVisualText = useCallback(
+    (value: string) => {
+      setVisualEditDraft((current) => ({ ...current, text: value }));
+      if (!selectedVisualEdit?.editable) return;
+      void pushVisualOperation({
+        id: visualOperationId(selectedVisualEdit, "setText"),
+        type: "setText",
+        selector: selectedVisualEdit.selector,
+        value,
+        url: selectedVisualEdit.url
+      });
+    },
+    [pushVisualOperation, selectedVisualEdit]
+  );
+
+  const updateVisualStyle = useCallback(
+    (
+      draftKey: keyof Pick<
+        VisualEditDraft,
+        "color" | "backgroundColor" | "fontSize" | "padding" | "margin" | "borderRadius"
+      >,
+      property: "color" | "backgroundColor" | "fontSize" | "padding" | "margin" | "borderRadius",
+      value: string,
+      cssValue = value
+    ) => {
+      setVisualEditDraft((current) => ({ ...current, [draftKey]: value }));
+      if (!selectedVisualEdit?.editable) return;
+      const operationId = visualOperationId(selectedVisualEdit, "setStyle");
+      const existing = visualEditSession.operations.find(
+        (operation): operation is Extract<VisualEditOperation, { type: "setStyle" }> =>
+          operation.id === operationId && operation.type === "setStyle"
+      );
+      void pushVisualOperation({
+        id: operationId,
+        type: "setStyle",
+        selector: selectedVisualEdit.selector,
+        styles: {
+          ...(existing?.styles || {}),
+          [property]: cssValue
+        },
+        url: selectedVisualEdit.url
+      });
+    },
+    [pushVisualOperation, selectedVisualEdit, visualEditSession.operations]
+  );
+
+  const updateVisualBox = useCallback(
+    (
+      draftKey: keyof Pick<VisualEditDraft, "x" | "y" | "width" | "height">,
+      property: "x" | "y" | "width" | "height",
+      value: string
+    ) => {
+      setVisualEditDraft((current) => ({ ...current, [draftKey]: value }));
+      if (!selectedVisualEdit?.editable) return;
+      const number = finiteNumber(value);
+      if (number === undefined) return;
+      const operationId = visualOperationId(selectedVisualEdit, "setBox");
+      const existing = visualEditSession.operations.find(
+        (operation): operation is Extract<VisualEditOperation, { type: "setBox" }> =>
+          operation.id === operationId && operation.type === "setBox"
+      );
+      const nextBox: Extract<VisualEditOperation, { type: "setBox" }>["box"] = {
+        ...(existing?.box || {}),
+        [property]: number
+      };
+      if (property === "width" || property === "height") {
+        nextBox.sizing = {
+          ...(nextBox.sizing || {}),
+          [property]: "fixed"
+        };
+      }
+      void pushVisualOperation({
+        id: operationId,
+        type: "setBox",
+        selector: selectedVisualEdit.selector,
+        box: nextBox,
+        url: selectedVisualEdit.url
+      });
+    },
+    [pushVisualOperation, selectedVisualEdit, visualEditSession.operations]
+  );
+
+  const updateVisualHidden = useCallback(
+    (hidden: boolean) => {
+      setVisualEditDraft((current) => ({ ...current, hidden }));
+      if (!selectedVisualEdit?.editable) return;
+      void pushVisualOperation({
+        id: visualOperationId(selectedVisualEdit, "hide"),
+        type: "hide",
+        selector: selectedVisualEdit.selector,
+        hidden,
+        url: selectedVisualEdit.url
+      });
+    },
+    [pushVisualOperation, selectedVisualEdit]
+  );
+
+  const undoVisualEdit = useCallback(async () => {
+    const previousOperations = visualEditPast[visualEditPast.length - 1];
+    if (!previousOperations) return;
+    const nextPast = visualEditPast.slice(0, -1);
+    const nextFuture = [visualEditSession.operations, ...visualEditFuture].slice(0, 30);
+    setVisualEditPast(nextPast);
+    setVisualEditFuture(nextFuture);
+    setVisualEditSession((current) => ({
+      ...current,
+      operations: previousOperations,
+      undoDepth: nextPast.length,
+      redoDepth: nextFuture.length
+    }));
+    await previewVisualOperations(previousOperations);
+  }, [previewVisualOperations, visualEditFuture, visualEditPast, visualEditSession.operations]);
+
+  const redoVisualEdit = useCallback(async () => {
+    const nextOperations = visualEditFuture[0];
+    if (!nextOperations) return;
+    const nextPast = [...visualEditPast, visualEditSession.operations].slice(-30);
+    const nextFuture = visualEditFuture.slice(1);
+    setVisualEditPast(nextPast);
+    setVisualEditFuture(nextFuture);
+    setVisualEditSession((current) => ({
+      ...current,
+      operations: nextOperations,
+      undoDepth: nextPast.length,
+      redoDepth: nextFuture.length
+    }));
+    await previewVisualOperations(nextOperations);
+  }, [previewVisualOperations, visualEditFuture, visualEditPast, visualEditSession.operations]);
+
+  const discardVisualEdits = useCallback(async () => {
+    if (activeTab?.id) {
+      try {
+        await sendVisualEditCommand({
+          type: BACKGROUND_MESSAGE.DISCARD_VISUAL_EDITS,
+          tabId: activeTab.id
+        });
+        await sendVisualEditCommand({
+          type: BACKGROUND_MESSAGE.STOP_VISUAL_EDIT,
+          tabId: activeTab.id
+        });
+      } catch (error) {
+        captureException(error);
+      }
+    }
+    setVisualEditPast([]);
+    setVisualEditFuture([]);
+    setVisualEditDraft(emptyVisualEditDraft);
+    setVisualEditSession({
+      active: false,
+      modId: visualEditMod?.id,
+      operations: [...(visualEditMod?.visual_edits || [])],
+      undoDepth: 0,
+      redoDepth: 0,
+      staleOperationIds: []
+    });
+    setStatusText("Visual edits discarded");
+  }, [activeTab?.id, sendVisualEditCommand, visualEditMod]);
+
+  const saveVisualEdits = useCallback(async () => {
+    if (!visualEditMod) return;
+    const operations = visualEditSession.operations;
+    setStatusText("Saving visual edits");
+    try {
+      if (activeTab?.id) {
+        await sendVisualEditCommand({
+          type: BACKGROUND_MESSAGE.COMMIT_VISUAL_EDITS,
+          tabId: activeTab.id,
+          operations
+        });
+      }
+      const response = await fetch(createModUrl(projectIdRef.current, visualEditMod.id), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visual_edits: operations })
+      });
+      if (!response.ok) {
+        throw new Error(`Backend returned ${response.status} saving visual edits.`);
+      }
+      const data = (await response.json()) as { mods?: ModRecord[]; bundles?: GeneratedBundle[] };
+      setMods(data.mods || []);
+      if (activeTab?.id) {
+        try {
+          await sendVisualEditCommand({
+            type: BACKGROUND_MESSAGE.STOP_VISUAL_EDIT,
+            tabId: activeTab.id
+          });
+        } catch (error) {
+          captureException(error);
+        }
+      }
+      await applyModBundles(data.bundles || []);
+      setVisualEditPast([]);
+      setVisualEditFuture([]);
+      setVisualEditSession((current) => ({
+        ...current,
+        active: false,
+        selected: undefined,
+        operations,
+        undoDepth: 0,
+        redoDepth: 0
+      }));
+      setStatusText("Visual edits saved");
+      addSystemMessage(`Saved ${operations.length} visual edit(s) on "${visualEditMod.name}".`);
+    } catch (error) {
+      setStatusText("Save failed");
+      addSystemMessage(error instanceof Error ? error.message : String(error));
+    }
+  }, [
+    activeTab?.id,
+    addSystemMessage,
+    applyModBundles,
+    sendVisualEditCommand,
+    visualEditMod,
+    visualEditSession.operations
+  ]);
 
   const sendTabContentResponse = useCallback(
     (requestId: string, content: unknown) => {
@@ -754,6 +1209,79 @@ export default function App() {
       .catch(captureException);
   }, [getActiveTabs]);
 
+  useEffect(() => {
+    if (!mods.length) {
+      setVisualEditModId("");
+      return;
+    }
+    if (!visualEditModId || !mods.some((mod) => mod.id === visualEditModId)) {
+      setVisualEditModId(mods[0].id);
+    }
+  }, [mods, visualEditModId]);
+
+  useEffect(() => {
+    const listener = (message: RuntimeRequest) => {
+      if (message.type === CONTENT_MESSAGE.VISUAL_EDIT_SELECTION) {
+        setVisualEditDraft(visualDraftFromSelection(message.payload));
+        setVisualEditSession((current) => ({ ...current, selected: message.payload }));
+        setStatusText(message.payload.editable ? "Element selected" : "Element not editable");
+        return false;
+      }
+
+      if (message.type === CONTENT_MESSAGE.VISUAL_EDIT_PREVIEW) {
+        const operation = message.payload.operation;
+        if (operation) {
+          setVisualEditSession((current) => ({
+            ...current,
+            operations: replaceVisualOperation(current.operations, operation),
+            staleOperationIds: message.payload.staleOperationIds || []
+          }));
+          if (operation.type === "setBox") {
+            setVisualEditDraft((current) => ({
+              ...current,
+              x: draftBoxValue(operation.box.x, current.x),
+              y: draftBoxValue(operation.box.y, current.y),
+              width: draftBoxValue(operation.box.width, current.width),
+              height: draftBoxValue(operation.box.height, current.height)
+            }));
+          } else if (operation.type === "setText") {
+            setVisualEditDraft((current) => ({
+              ...current,
+              text: operation.value
+            }));
+          } else if (operation.type === "setStyle" && operation.styles.fontSize) {
+            setVisualEditDraft((current) => ({
+              ...current,
+              fontSize: parseCssNumber(operation.styles.fontSize)
+            }));
+          }
+          return false;
+        }
+        setVisualEditSession((current) => ({
+          ...current,
+          staleOperationIds: message.payload.staleOperationIds || []
+        }));
+        if (message.payload.error) setStatusText("Preview failed");
+        return false;
+      }
+
+      if (message.type === CONTENT_MESSAGE.VISUAL_EDIT_COMMIT) {
+        setVisualEditSession((current) => ({
+          ...current,
+          staleOperationIds: message.payload.staleOperationIds || []
+        }));
+        return false;
+      }
+
+      return false;
+    };
+
+    chrome.runtime.onMessage.addListener(listener);
+    return () => {
+      chrome.runtime.onMessage.removeListener(listener);
+    };
+  }, []);
+
   // Load the mod list and (re)apply every active mod whenever the project changes.
   useEffect(() => {
     void refreshAndApplyMods(projectId);
@@ -1020,6 +1548,273 @@ export default function App() {
             })}
           </ul>
         )}
+      </section>
+
+      <section className="panel-section visual-editor-panel" aria-label="Visual editor">
+        <div className="section-title">
+          <SlidersHorizontal aria-hidden="true" />
+          <h2>Visual edit</h2>
+          <button
+            type="button"
+            title={visualEditSession.active ? "Stop visual edit" : "Start visual edit"}
+            onClick={() => void toggleVisualEdit()}
+            className={`icon-button ${visualEditSession.active ? "active" : ""}`}
+            disabled={!activeTab || !visualEditMod}
+          >
+            <MousePointer2 aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="visual-editor-toolbar">
+          <select
+            value={visualEditMod?.id || ""}
+            onChange={(event) => setVisualEditModId(event.target.value)}
+            disabled={visualEditSession.active || mods.length === 0}
+          >
+            {mods.length === 0 ? <option value="">No mods</option> : null}
+            {mods.map((mod) => (
+              <option key={mod.id} value={mod.id}>
+                {mod.name}
+              </option>
+            ))}
+          </select>
+          <span className={`visual-edit-pill ${visualEditSession.active ? "active" : ""}`}>
+            {visualEditSession.active ? "active" : "idle"}
+          </span>
+          <span className="visual-edit-pill">
+            {visualEditSession.operations.length} edit{visualEditSession.operations.length === 1 ? "" : "s"}
+          </span>
+        </div>
+
+        {visualEditSession.staleOperationIds.length > 0 ? (
+          <div className="visual-stale">
+            <AlertTriangle aria-hidden="true" />
+            <span>{visualEditSession.staleOperationIds.length} stale edit(s)</span>
+          </div>
+        ) : null}
+
+        {selectedVisualEdit ? (
+          <div className="visual-selection">
+            <div className="visual-selection-head">
+              <strong>{selectedVisualEdit.tag}</strong>
+              <span>{Math.round(selectedVisualEdit.rect.width)} x {Math.round(selectedVisualEdit.rect.height)}</span>
+            </div>
+            <code title={selectedVisualEdit.selector}>{selectedVisualEdit.selector}</code>
+            {selectedVisualEdit.ownership.hints.length ? (
+              <p>{selectedVisualEdit.ownership.hints.slice(0, 2).join(" · ")}</p>
+            ) : selectedVisualEdit.ownership.modId || visualEditMod ? (
+              <p>Editing {visualEditMod?.name || selectedVisualEdit.ownership.modId}</p>
+            ) : (
+              <p>No DOM ownership marker</p>
+            )}
+            {!selectedVisualEdit.editable ? (
+              <div className="visual-stale">
+                <AlertTriangle aria-hidden="true" />
+                <span>{selectedVisualEdit.notEditableReason || "Element is not editable"}</span>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="empty">{visualEditSession.active ? "No element selected." : "Visual edit is idle."}</p>
+        )}
+
+        {selectedVisualEdit ? (
+          <div className="visual-controls">
+            <label className="visual-field visual-field-full">
+              <span>Text</span>
+              <textarea
+                value={visualEditDraft.text}
+                onChange={(event) => updateVisualText(event.target.value)}
+                rows={2}
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field color-field">
+              <span>Color</span>
+              <input
+                type="color"
+                value={visualEditDraft.color}
+                onChange={(event) => updateVisualStyle("color", "color", event.target.value)}
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field color-field">
+              <span>Background</span>
+              <input
+                type="color"
+                value={visualEditDraft.backgroundColor}
+                onChange={(event) =>
+                  updateVisualStyle("backgroundColor", "backgroundColor", event.target.value)
+                }
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>Font</span>
+              <input
+                type="number"
+                min="0"
+                value={visualEditDraft.fontSize}
+                onChange={(event) =>
+                  updateVisualStyle(
+                    "fontSize",
+                    "fontSize",
+                    event.target.value,
+                    numericCssValue(event.target.value)
+                  )
+                }
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>Padding</span>
+              <input
+                type="number"
+                min="0"
+                value={visualEditDraft.padding}
+                onChange={(event) =>
+                  updateVisualStyle(
+                    "padding",
+                    "padding",
+                    event.target.value,
+                    numericCssValue(event.target.value)
+                  )
+                }
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>Margin</span>
+              <input
+                type="number"
+                min="0"
+                value={visualEditDraft.margin}
+                onChange={(event) =>
+                  updateVisualStyle(
+                    "margin",
+                    "margin",
+                    event.target.value,
+                    numericCssValue(event.target.value)
+                  )
+                }
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>Radius</span>
+              <input
+                type="number"
+                min="0"
+                value={visualEditDraft.borderRadius}
+                onChange={(event) =>
+                  updateVisualStyle(
+                    "borderRadius",
+                    "borderRadius",
+                    event.target.value,
+                    numericCssValue(event.target.value)
+                  )
+                }
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>X</span>
+              <input
+                type="number"
+                value={visualEditDraft.x}
+                onChange={(event) => updateVisualBox("x", "x", event.target.value)}
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>Y</span>
+              <input
+                type="number"
+                value={visualEditDraft.y}
+                onChange={(event) => updateVisualBox("y", "y", event.target.value)}
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>Width</span>
+              <input
+                type="number"
+                min="0"
+                value={visualEditDraft.width}
+                onChange={(event) => updateVisualBox("width", "width", event.target.value)}
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-field">
+              <span>Height</span>
+              <input
+                type="number"
+                min="0"
+                value={visualEditDraft.height}
+                onChange={(event) => updateVisualBox("height", "height", event.target.value)}
+                disabled={!selectedVisualEdit.editable}
+              />
+            </label>
+
+            <label className="visual-toggle">
+              <input
+                type="checkbox"
+                checked={visualEditDraft.hidden}
+                onChange={(event) => updateVisualHidden(event.target.checked)}
+                disabled={!selectedVisualEdit.editable}
+              />
+              <EyeOff aria-hidden="true" />
+              <span>Hide</span>
+            </label>
+          </div>
+        ) : null}
+
+        <div className="visual-editor-actions">
+          <button
+            type="button"
+            className="icon-button"
+            title="Undo"
+            onClick={() => void undoVisualEdit()}
+            disabled={!visualEditSession.active || visualEditPast.length === 0}
+          >
+            <Undo2 aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            title="Redo"
+            onClick={() => void redoVisualEdit()}
+            disabled={!visualEditSession.active || visualEditFuture.length === 0}
+          >
+            <Redo2 aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="mod-action"
+            onClick={() => void saveVisualEdits()}
+            disabled={!visualEditSession.active || !visualEditMod}
+          >
+            <Save aria-hidden="true" /> Save
+          </button>
+          <button
+            type="button"
+            className="mod-action ghost"
+            onClick={() => void discardVisualEdits()}
+            disabled={!visualEditSession.active}
+          >
+            Discard
+          </button>
+        </div>
       </section>
 
       {rules.length ? (
