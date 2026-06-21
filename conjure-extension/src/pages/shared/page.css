@@ -32,7 +32,6 @@
 .cj-page__settings {
   min-height: 0;
   overflow: auto;
-  padding: var(--cj-pane-pad);
 }
 
 @media (max-width: 760px) {

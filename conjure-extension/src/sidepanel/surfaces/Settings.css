@@ -53,6 +53,13 @@
   flex: 0 0 auto;
 }
 
+.sp-header-mode {
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 /* project pane: key/value input row */
 .sp-kv-row {
   display: grid;

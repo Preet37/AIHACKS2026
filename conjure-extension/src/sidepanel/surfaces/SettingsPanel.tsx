@@ -145,9 +145,7 @@ export function SettingsPanel() {
         surface
         ariaLabel="Work mode"
         headerRight={
-          <span style={{ color: "var(--cj-dim)", fontSize: "var(--cj-fs-micro)", letterSpacing: "0.12em", textTransform: "uppercase" }}>
-            {uiSettings.workMode}
-          </span>
+          <span className="sp-header-mode">{uiSettings.workMode}</span>
         }
       >
         <div className="sp-pane-body">

@@ -151,6 +151,30 @@
   outline-offset: 1px;
 }
 
+.ds-swatch--ground {
+  background: var(--cj-ground);
+}
+
+.ds-swatch--surface {
+  background: var(--cj-surface);
+}
+
+.ds-swatch--surface-2 {
+  background: var(--cj-surface-2);
+}
+
+.ds-swatch--dim {
+  background: var(--cj-dim);
+}
+
+.ds-swatch--text {
+  background: var(--cj-text);
+}
+
+.ds-swatch--accent {
+  background: var(--cj-accent);
+}
+
 .ds-swatch--none {
   position: relative;
   background: transparent;
@@ -184,6 +208,11 @@
   font-size: var(--cj-fs-micro);
 }
 
+.ds-slider-zero {
+  color: var(--cj-faint);
+  font-size: var(--cj-fs-micro);
+}
+
 .ds-slider-track {
   position: relative;
   height: 12px;
@@ -198,12 +227,20 @@
   background: var(--cj-accent);
 }
 
+.ds-slider-fill--padding {
+  width: 42%;
+}
+
 .ds-slider-thumb {
   position: absolute;
   top: -5px;
   width: 5px;
   height: 10px;
   background: var(--cj-text);
+}
+
+.ds-slider-thumb--padding {
+  left: calc(42% - 3px);
 }
 
 .ds-field-pair {
@@ -226,4 +263,8 @@
 .ds-input:focus {
   outline: none;
   border-color: var(--cj-accent);
+}
+
+.ds-run-agent {
+  justify-content: flex-start;
 }

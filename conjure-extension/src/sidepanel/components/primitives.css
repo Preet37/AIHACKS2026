@@ -98,7 +98,7 @@
   border: 1px solid transparent;
   background: transparent;
   color: var(--cj-dim);
-  font-size: 10px;
+  font-size: var(--cj-fs-micro);
   cursor: pointer;
 }
 .cj-ws:hover {

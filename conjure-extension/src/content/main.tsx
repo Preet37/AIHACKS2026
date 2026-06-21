@@ -90,6 +90,9 @@ const commandStyles = () => `
     --cj-accent-wash: rgba(108, 106, 245, 0.16);
     --cj-line: rgba(240, 240, 245, 0.14);
     --cj-line-strong: rgba(240, 240, 245, 0.28);
+    --cj-fs-micro: 11px;
+    --cj-fs-body: 13px;
+    --cj-fs-label: 16px;
     --cj-dur-fast: 120ms;
     --cj-dur-med: 180ms;
     --cj-ease: cubic-bezier(0.2, 0, 0, 1);
@@ -142,7 +145,7 @@ const commandStyles = () => `
     outline: none;
     background: transparent;
     color: var(--cj-text);
-    font-size: 16px;
+    font-size: var(--cj-fs-label);
     caret-color: var(--cj-accent);
   }
   input::placeholder {
@@ -152,7 +155,7 @@ const commandStyles = () => `
     border: 1px solid var(--cj-line);
     padding: 1px 5px;
     color: var(--cj-dim);
-    font-size: 11px;
+    font-size: var(--cj-fs-micro);
   }
   ul {
     margin: 0;
@@ -170,7 +173,7 @@ const commandStyles = () => `
     border-bottom: 1px solid var(--cj-line);
     background: transparent;
     color: var(--cj-dim);
-    font-size: 13px;
+    font-size: var(--cj-fs-body);
     text-align: left;
     cursor: pointer;
   }
@@ -201,7 +204,7 @@ const commandStyles = () => `
   .hint,
   footer {
     color: var(--cj-faint);
-    font-size: 11px;
+    font-size: var(--cj-fs-micro);
   }
   footer {
     display: flex;
