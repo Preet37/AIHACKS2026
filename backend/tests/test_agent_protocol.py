@@ -1,10 +1,25 @@
+import asyncio
+
 from fastapi.testclient import TestClient
 
-from backend.main import app
+from backend.main import (
+    _agent_with_client_provider,
+    _finish_provisional_mod,
+    _looks_like_mod_request,
+    app,
+)
 import pytest
 
+from backend.utils import mods as mods_registry
+from backend.utils import agent as agent_module
 from backend.utils.agent import ConjureAgent
 from backend.utils.config import Settings, load_settings
+from backend.utils.tools import (
+    project_dir_for,
+    reset_tool_context,
+    set_tool_context,
+    start_mod,
+)
 
 
 def test_health_endpoint_reports_ok():
@@ -72,6 +87,160 @@ def test_load_settings_defaults_to_groq(monkeypatch):
     assert settings.agent_provider == "groq"
     assert settings.groq_api_key == "gsk_test"
     assert settings.groq_model == "llama-3.3-70b-versatile"
+
+
+def test_client_provider_switch_uses_backend_env_credentials(tmp_path):
+    agent = ConjureAgent(
+        Settings(
+            agent_provider="claude",
+            anthropic_api_key="sk-ant-env",
+            groq_api_key="gsk-env",
+            project_root=tmp_path,
+        )
+    )
+
+    anthropic = _agent_with_client_provider(agent, {"provider": "anthropic"})
+    groq = _agent_with_client_provider(agent, {"provider": "groq"})
+
+    assert anthropic.settings.agent_provider == "claude"
+    assert anthropic.settings.anthropic_api_key == "sk-ant-env"
+    assert groq.settings.agent_provider == "groq"
+    assert groq.settings.groq_api_key == "gsk-env"
+
+
+def test_client_provider_switch_rejects_missing_backend_key(tmp_path):
+    agent = ConjureAgent(Settings(anthropic_api_key="sk-ant-env", project_root=tmp_path))
+
+    with pytest.raises(ValueError, match="GROQ_API_KEY"):
+        _agent_with_client_provider(agent, {"provider": "groq"})
+
+
+def test_short_ui_change_is_recognized_as_mod_request():
+    assert _looks_like_mod_request("make bg red")
+    assert _looks_like_mod_request("hide the timer")
+    assert not _looks_like_mod_request("what is on this page?")
+    assert not _looks_like_mod_request("summarize this article")
+
+
+def test_provisional_mod_is_scoped_to_active_tab(tmp_path):
+    record = mods_registry.create_mod(tmp_path, prompt="make bg red", name="Red background")
+    directory = mods_registry.mod_dir(tmp_path, record["id"])
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "manifest.json").write_text(
+        '{"manifest_version":3,"name":"Red","version":"1.0.0",'
+        '"content_scripts":[{"matches":["<all_urls>"],"js":["content.js"]}]}',
+        encoding="utf-8",
+    )
+    (directory / "content.js").write_text(
+        'document.documentElement.style.background = "red";', encoding="utf-8"
+    )
+
+    kept = _finish_provisional_mod(
+        tmp_path,
+        record["id"],
+        keep=True,
+        current_tab_url="https://arithmetic.zetamac.com/game?key=1",
+    )
+
+    assert kept
+    saved = mods_registry.get_mod(tmp_path, record["id"])
+    assert saved is not None
+    assert saved["status"] == "active"
+    assert saved["scope_mode"] == "current_tab"
+    bundle = mods_registry.mod_bundle(tmp_path, record["id"])
+    assert bundle is not None
+    assert bundle["matches"] == ["https://arithmetic.zetamac.com/*"]
+
+
+def test_groq_prose_only_build_is_retried_with_tools(monkeypatch, tmp_path):
+    settings = Settings(agent_provider="groq", groq_api_key="gsk-test", project_root=tmp_path)
+    project_dir = project_dir_for(settings, "project-123")
+    record = mods_registry.create_mod(project_dir, prompt="make bg red", name="Red background")
+
+    class FakeChunk:
+        def __init__(self, content="", tool_calls=None):
+            self.content = content
+            self.text = content
+            self.tool_calls = tool_calls or []
+
+    class FakeGroqModel:
+        calls = 0
+
+        async def astream(self, _messages):
+            self.calls += 1
+            if self.calls == 1:
+                yield FakeChunk("Done! Refresh to see the red background.")
+            elif self.calls == 2:
+                yield FakeChunk(
+                    tool_calls=[
+                        {
+                            "id": "manifest",
+                            "name": "write_file",
+                            "args": {
+                                "path": "manifest.json",
+                                "content": '{"manifest_version":3,"name":"Red","version":"1.0.0",'
+                                '"content_scripts":[{"matches":["<all_urls>"],"js":["content.js"]}]}',
+                            },
+                        },
+                        {
+                            "id": "script",
+                            "name": "write_file",
+                            "args": {
+                                "path": "content.js",
+                                "content": 'document.body.style.background = "red";',
+                            },
+                        },
+                    ]
+                )
+            else:
+                yield FakeChunk("The mod is now active.")
+
+    model = FakeGroqModel()
+    monkeypatch.setattr(agent_module, "_build_llm", lambda *_args, **_kwargs: model)
+    monkeypatch.setattr(agent_module, "get_langchain_tools", lambda: [object()])
+
+    agent = ConjureAgent(settings)
+    events = list(
+        agent.stream_chat_response_sync(
+            query="make bg red",
+            project_id="project-123",
+            conversation_id="conversation-123",
+            active_tabs=[],
+            pending_tab_requests={},
+            active_mod_id=record["id"],
+        )
+    )
+
+    assert model.calls == 3
+    assert any(event.get("type") == "tool_start" for event in events)
+    assert not any("Refresh to see" in event.get("content", "") for event in events)
+    assert any("now active" in event.get("content", "") for event in events)
+    assert mods_registry.mod_bundle(project_dir, record["id"]) is not None
+
+
+def test_start_mod_reuses_active_provisional(tmp_path):
+    settings = Settings(project_root=tmp_path)
+    project_dir = project_dir_for(settings, "project-123")
+    provisional = mods_registry.create_mod(
+        project_dir, prompt="make bg rainbow", name="Rainbow background"
+    )
+    active_dir = mods_registry.mod_dir(project_dir, provisional["id"])
+    tokens = set_tool_context(
+        outbound_queue=None,
+        pending_tab_requests=None,
+        project_dir=project_dir,
+        settings=settings,
+        active_mod_dir=active_dir,
+    )
+    try:
+        result = asyncio.run(start_mod(prompt="animated rainbow", name="Rainbow Background"))
+    finally:
+        reset_tool_context(tokens)
+
+    assert provisional["id"] in result
+    records = mods_registry.list_mods(project_dir)
+    assert len(records) == 1
+    assert records[0]["id"] == provisional["id"]
 
 
 def test_demo_agent_streams_protocol_events_without_api_key(tmp_path):

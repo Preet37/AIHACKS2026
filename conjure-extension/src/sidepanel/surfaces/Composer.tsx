@@ -32,7 +32,7 @@ export function Composer() {
         placeholder="ask or speak to conjure…"
         size="bar"
         showMic
-        onMic={voiceState === "idle" || voiceState === "recording" ? () => void activateMic() : undefined}
+        onMic={voiceState !== "transcribing" ? () => void activateMic() : undefined}
         showShortcut
         ariaLabel={micLabel}
         voiceState={voiceState}

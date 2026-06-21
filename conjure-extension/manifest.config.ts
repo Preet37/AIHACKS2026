@@ -12,10 +12,6 @@ export default defineManifest((env) => ({
   side_panel: {
     default_path: "index.html"
   },
-  options_ui: {
-    page: "settings.html",
-    open_in_tab: true
-  },
   commands: {
     "toggle-command-bar": {
       suggested_key: {

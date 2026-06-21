@@ -118,15 +118,17 @@
   color: var(--cj-accent-bright);
 }
 .cj-statusbar__right {
-  flex: 0 0 auto;
+  flex: 0 0 clamp(150px, 38vw, 220px);
+  width: clamp(150px, 38vw, 220px);
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-  max-width: 240px;
   overflow: hidden;
   white-space: nowrap;
 }
 .cj-statusbar__status {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

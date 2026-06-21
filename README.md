@@ -2,7 +2,8 @@
 
 `conjure` is a self-building browser agent. A local Chrome extension gathers browser context and hosts the chat UI; a FastAPI backend routes work to the configured coding provider, tracks progress, stores conversation/session state, and reports finished agent session or PR links back to the user.
 
-The architecture source of truth is [MASTER_DESIGN_DOC.md](MASTER_DESIGN_DOC.md).
+See the [left-to-right system diagram](ARCHITECTURE.md) for the implemented stack and
+[MASTER_DESIGN_DOC.md](MASTER_DESIGN_DOC.md) for the architecture source of truth.
 
 ## Expected Layout
 

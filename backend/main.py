@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
+import re
 import uuid
+from dataclasses import replace
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -105,6 +110,12 @@ async def voice_transcribe(request: Request) -> dict[str, str]:
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {"transcript": transcript}
+
+
+@app.get("/voice/status")
+async def voice_status() -> dict[str, str | bool]:
+    """Report Deepgram readiness without returning credentials."""
+    return voice_utils.status()
 
 
 @app.post("/voice/speak")
@@ -291,19 +302,41 @@ async def _handle_chat_message(
     )
     await websocket.send_json({"type": "conversation_id", "conversation_id": conversation_id})
 
-    # When the panel sends a mod_id, this turn edits that mod (a prompt change),
-    # so refresh its stored prompt up front and route generation into it.
+    try:
+        request_agent = _agent_with_client_provider(agent, message)
+    except ValueError as exc:
+        await websocket.send_json({"type": "error", "message": str(exc)})
+        return
+
+    # Existing edits target their mod explicitly. New UI-change requests get a
+    # provisional mod so file tools always write into a real mod directory.
     active_mod_id = message.get("mod_id") or None
+    project_dir = project_dir_for(request_agent.settings, project_id)
+    provisional_mod_id: str | None = None
     if active_mod_id:
-        project_dir = project_dir_for(load_settings(), project_id)
         if mods_registry.get_mod(project_dir, active_mod_id) is not None:
             mods_registry.upsert_mod(project_dir, {"id": active_mod_id, "prompt": query})
         else:
             active_mod_id = None
+    if not active_mod_id and _looks_like_mod_request(query):
+        provisional = mods_registry.create_mod(
+            project_dir,
+            prompt=query,
+            name=_mod_name_from_query(query),
+        )
+        provisional_mod_id = str(provisional["id"])
+        active_mod_id = provisional_mod_id
+        mods_registry.upsert_mod(project_dir, {"id": provisional_mod_id, "status": "building"})
 
     content_parts: list[str] = []
+    if active_mod_id:
+        acknowledgement = "Got it — I’ll make that change on this tab now.\n\n"
+        content_parts.append(acknowledgement)
+        await websocket.send_json(
+            {"type": "content", "content": acknowledgement, "phase": "ack"}
+        )
     try:
-        async for event in agent.stream_chat_response(
+        async for event in request_agent.stream_chat_response(
             query=query,
             project_id=project_id,
             conversation_id=conversation_id,
@@ -317,9 +350,24 @@ async def _handle_chat_message(
                 content_parts.append(str(event.get("content", "")))
             await websocket.send_json(event)
     except WebSocketDisconnect:
+        if provisional_mod_id:
+            _finish_provisional_mod(project_dir, provisional_mod_id, keep=False)
         raise
     except Exception as exc:
+        if provisional_mod_id:
+            _finish_provisional_mod(project_dir, provisional_mod_id, keep=False)
         await websocket.send_json({"type": "error", "message": str(exc)})
+        return
+
+    if provisional_mod_id and not _finish_provisional_mod(
+        project_dir,
+        provisional_mod_id,
+        keep=True,
+        current_tab_url=_active_tab_url(active_tabs),
+    ):
+        await websocket.send_json(
+            {"type": "error", "message": "Agent finished without producing a valid mod bundle"}
+        )
         return
 
     content = "".join(content_parts)
@@ -338,6 +386,102 @@ async def _handle_chat_message(
             "content": content,
         }
     )
+
+
+def _agent_with_client_provider(
+    agent: ConjureAgent,
+    message: dict[str, Any],
+) -> ConjureAgent:
+    """Select a provider per turn while keeping credentials on the backend."""
+    requested = message.get("provider")
+    if requested is None:
+        return agent
+    if requested not in {"anthropic", "groq"}:
+        raise ValueError("chat.provider must be 'anthropic' or 'groq'")
+
+    provider = "claude" if requested == "anthropic" else "groq"
+    settings = replace(agent.settings, agent_provider=provider)
+    if requested == "anthropic" and not settings.anthropic_api_key:
+        raise ValueError("ANTHROPIC_API_KEY is not configured in the backend .env")
+    if requested == "groq" and not settings.groq_api_key:
+        raise ValueError("GROQ_API_KEY is not configured in the backend .env")
+    return ConjureAgent(settings)
+
+
+def _looks_like_mod_request(query: str) -> bool:
+    """Recognize explicit page/UI mutations without treating questions as builds."""
+    normalized = " ".join(query.lower().split())
+    if re.match(r"^(?:what|why|how|who|when|where|find|search|summarize|explain)\b", normalized):
+        return False
+    return bool(
+        re.search(
+            r"\b(?:make|change|set|turn|add|create|build|hide|show|remove|delete|replace|"
+            r"highlight|style|resize|move|inject|modify|customize)\b",
+            normalized,
+        )
+    )
+
+
+def _mod_name_from_query(query: str) -> str:
+    name = " ".join(query.strip().split())
+    return (name[:57].rstrip() + "...") if len(name) > 60 else (name or "Untitled mod")
+
+
+def _finish_provisional_mod(
+    project_dir: Path,
+    mod_id: str,
+    *,
+    keep: bool,
+    current_tab_url: str | None = None,
+) -> bool:
+    """Promote a valid provisional mod or remove its empty record."""
+    if keep and mods_registry.mod_bundle(project_dir, mod_id) is not None:
+        scope_changed = bool(
+            current_tab_url and _scope_mod_manifest_to_url(project_dir, mod_id, current_tab_url)
+        )
+        update: dict[str, Any] = {
+            "id": mod_id,
+            "status": "active",
+            "scope_mode": "current_tab",
+        }
+        if scope_changed:
+            update["last_verified"] = None
+        mods_registry.upsert_mod(project_dir, update)
+        return True
+    mods_registry.delete_mod(project_dir, mod_id)
+    return False
+
+
+def _active_tab_url(active_tabs: list[dict[str, Any]]) -> str | None:
+    candidates = [*filter(lambda tab: tab.get("active"), active_tabs), *active_tabs]
+    for tab in candidates:
+        url = tab.get("url")
+        if isinstance(url, str) and urlparse(url).scheme in {"http", "https"}:
+            return url
+    return None
+
+
+def _scope_mod_manifest_to_url(project_dir: Path, mod_id: str, tab_url: str) -> bool:
+    parsed = urlparse(tab_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    manifest_path = mods_registry.mod_dir(project_dir, mod_id) / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    scripts = manifest.get("content_scripts")
+    if not isinstance(scripts, list):
+        return False
+    pattern = f"{parsed.scheme}://{parsed.hostname}/*"
+    changed = False
+    for script in scripts:
+        if isinstance(script, dict) and script.get("matches") != [pattern]:
+            script["matches"] = [pattern]
+            changed = True
+    if changed:
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return changed
 
 
 async def _update_memory(

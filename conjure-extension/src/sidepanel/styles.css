@@ -103,7 +103,8 @@ figure {
   min-height: 0;
   flex-direction: column;
   gap: 0;
-  overflow-y: auto;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
   padding: 0;
 }
 

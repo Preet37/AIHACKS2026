@@ -108,6 +108,8 @@ export const createStaticSurfaceValue = ({
     setPlanningCustom: noop,
     selectedPlanningOption: { id: "", title: "", detail: "" },
     runPlanningBuild: noop,
+    provider: "anthropic",
+    setProvider: noop,
     uiSettings,
     toggleUiSetting: (key) => {
       setUiSettings((current) => {
@@ -137,6 +139,7 @@ export const createStaticSurfaceValue = ({
     showCommand: false,
     setShowCommand: noop,
     handleCommandSubmit: noop,
+    deepgramStatus: "checking",
     voiceState: "idle",
     voiceError: null,
     barAmplitudes: [],

@@ -31,6 +31,7 @@ class ConjureAgent:
         active_tabs: Sequence[Mapping[str, Any]] | None,
         pending_tab_requests: dict[str, asyncio.Future[Any]],
         history: Sequence[Mapping[str, Any]] | None = None,
+        active_mod_id: str | None = None,
     ) -> list[dict[str, Any]]:
         async def collect() -> list[dict[str, Any]]:
             return [
@@ -42,6 +43,7 @@ class ConjureAgent:
                     active_tabs=active_tabs,
                     pending_tab_requests=pending_tab_requests,
                     history=history,
+                    active_mod_id=active_mod_id,
                 )
             ]
 
@@ -201,13 +203,19 @@ class ConjureAgent:
                 messages.append(HumanMessage(content=text))
         messages.append(HumanMessage(content=query))
 
+        used_any_tool = False
+        tool_free_build_retried = False
         for _ in range(self.settings.max_agent_iterations):
             full = None
+            turn_text_chunks: list[str] = []
             async for chunk in model.astream(messages):
                 full = chunk if full is None else full + chunk
                 text = _chunk_text(chunk)
                 if text:
-                    yield {"type": "content", "content": text}
+                    if editing_mod_id:
+                        turn_text_chunks.append(text)
+                    else:
+                        yield {"type": "content", "content": text}
 
             if full is None:
                 return
@@ -215,9 +223,31 @@ class ConjureAgent:
             messages.append(full)
             tool_calls = getattr(full, "tool_calls", None) or []
             if not tool_calls:
+                if editing_mod_id and not used_any_tool and not tool_free_build_retried:
+                    tool_free_build_retried = True
+                    messages.append(
+                        HumanMessage(
+                            content=(
+                                "This is a browser-mod build, not a prose-only request. "
+                                "You have not changed any files. Use write_file/create_file now "
+                                "to produce manifest.json and content.js for the requested change, "
+                                "then call verify_mod. Do not claim completion before using tools."
+                            )
+                        )
+                    )
+                    yield {"type": "thinking"}
+                    continue
+                if editing_mod_id and not used_any_tool:
+                    raise RuntimeError("Agent finished without creating any mod files")
+                for text in turn_text_chunks:
+                    yield {"type": "content", "content": text}
                 return
 
+            for text in turn_text_chunks:
+                yield {"type": "content", "content": text}
+
             for call in tool_calls:
+                used_any_tool = True
                 name = _tool_call_name(call)
                 args = _tool_call_args(call)
                 call_id = _tool_call_id(call)

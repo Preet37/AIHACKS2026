@@ -525,6 +525,14 @@ async def start_mod(prompt: str, name: str = "", mod_id: str | None = None) -> s
     from . import mods
 
     project_dir = _project_dir()
+    active = _active_mod_dir_var.get()
+    if mod_id is None and active is not None:
+        # The websocket layer pre-creates a provisional mod for build requests.
+        # Models may still follow the generic prompt and call start_mod(); reuse
+        # that active provisional instead of orphaning it and creating a second ID.
+        active_record = mods.get_mod(project_dir, active.name)
+        if active_record is not None:
+            mod_id = active.name
     if mod_id:
         existing = mods.get_mod(project_dir, mod_id)
         if existing is None:

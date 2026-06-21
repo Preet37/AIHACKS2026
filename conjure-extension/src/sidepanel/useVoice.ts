@@ -9,6 +9,7 @@ import { BACKGROUND_MESSAGE } from "../shared/messages";
 import { CONJURE_CONFIG } from "../shared/config";
 
 export type VoiceState = "idle" | "recording" | "transcribing" | "speaking";
+export type DeepgramStatus = "checking" | "ready" | "missing" | "offline";
 export const VOICE_BAR_COUNT = 20;
 
 export interface UseVoiceOptions {
@@ -20,6 +21,7 @@ export interface UseVoiceReturn {
   voiceError: string | null;
   barAmplitudes: number[];
   permissionState: PermissionState | null;
+  deepgramStatus: DeepgramStatus;
   activateMic: () => Promise<void>;
   speakText: (text: string, opts?: { autoListen?: boolean }) => Promise<void>;
 }
@@ -31,15 +33,54 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
     Array(VOICE_BAR_COUNT).fill(0)
   );
   const [permissionState] = useState<PermissionState | null>(null);
+  const [deepgramStatus, setDeepgramStatus] = useState<DeepgramStatus>("checking");
 
   const isRecordingRef = useRef(false);
+  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const resolvePlaybackRef = useRef<(() => void) | null>(null);
+  const playbackInterruptedRef = useRef(false);
 
   // Stable ref so keyboard handlers don't go stale
   const activateMicRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const response = await fetch(`${CONJURE_CONFIG.backendUrl}/voice/status`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = (await response.json()) as { configured?: boolean };
+        if (!cancelled) setDeepgramStatus(data.configured ? "ready" : "missing");
+      } catch {
+        if (!cancelled) setDeepgramStatus("offline");
+      }
+    };
+    void check();
+    const timer = window.setInterval(check, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const stopSpeaking = useCallback(() => {
+    const audio = activeAudioRef.current;
+    if (!audio) return false;
+    playbackInterruptedRef.current = true;
+    audio.pause();
+    audio.currentTime = 0;
+    activeAudioRef.current = null;
+    resolvePlaybackRef.current?.();
+    resolvePlaybackRef.current = null;
+    return true;
+  }, []);
+
   // Amplitude + hotkey relay both handled in the useEffect below
 
   const activateMic = useCallback(async () => {
+    // Barge-in: stopping TTS is synchronous, then the same action starts the mic.
+    stopSpeaking();
+
     // ── STOP + TRANSCRIBE ────────────────────────────────────────────────────
     if (isRecordingRef.current) {
       isRecordingRef.current = false;
@@ -94,7 +135,7 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
     } catch (err) {
       setVoiceError(err instanceof Error ? err.message : "Could not start mic");
     }
-  }, [onTranscript]);
+  }, [onTranscript, stopSpeaking]);
 
   // Keep ref current so keyboard handlers always call latest version
   useEffect(() => { activateMicRef.current = activateMic; }, [activateMic]);
@@ -141,6 +182,8 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
   // ── TTS ───────────────────────────────────────────────────────────────────
   const speakText = useCallback(async (text: string, opts?: { autoListen?: boolean }) => {
     if (!text.trim()) return;
+    stopSpeaking();
+    playbackInterruptedRef.current = false;
     setVoiceState("speaking");
     try {
       const res = await fetch(`${CONJURE_CONFIG.backendUrl}/voice/speak`, {
@@ -152,21 +195,33 @@ export function useVoice({ onTranscript }: UseVoiceOptions): UseVoiceReturn {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
+      activeAudioRef.current = audio;
       await new Promise<void>((resolve) => {
-        audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-        audio.onerror = () => resolve();
+        const finish = () => {
+          if (activeAudioRef.current === audio) activeAudioRef.current = null;
+          resolvePlaybackRef.current = null;
+          URL.revokeObjectURL(url);
+          resolve();
+        };
+        resolvePlaybackRef.current = finish;
+        audio.onended = finish;
+        audio.onerror = finish;
         void audio.play();
       });
     } catch (err) {
       console.error("[voice] TTS error:", err);
     } finally {
-      setVoiceState("idle");
+      if (!isRecordingRef.current) setVoiceState("idle");
     }
     // If LLM ended with a question, automatically open the mic for the reply
-    if (opts?.autoListen && !isRecordingRef.current) {
+    if (opts?.autoListen && !playbackInterruptedRef.current && !isRecordingRef.current) {
       await activateMicRef.current();
     }
-  }, []);
+  }, [stopSpeaking]);
 
-  return { voiceState, voiceError, barAmplitudes, permissionState, activateMic, speakText };
+  useEffect(() => () => {
+    stopSpeaking();
+  }, [stopSpeaking]);
+
+  return { voiceState, voiceError, barAmplitudes, permissionState, deepgramStatus, activateMic, speakText };
 }

@@ -53,6 +53,50 @@
   flex: 0 0 auto;
 }
 
+.sp-deepgram {
+  border-color: var(--cj-accent);
+  background: var(--cj-accent-wash);
+}
+
+.sp-deepgram__body {
+  display: grid;
+  gap: 10px;
+  padding: 16px var(--cj-pane-pad);
+}
+
+.sp-deepgram__brand {
+  color: var(--cj-accent-bright);
+  font-family: var(--cj-font-pixel);
+  font-size: var(--cj-fs-title);
+  letter-spacing: 0.08em;
+}
+
+.sp-deepgram__copy,
+.sp-deepgram__hint,
+.sp-deepgram__warning {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.sp-deepgram__copy { color: var(--cj-text); }
+.sp-deepgram__hint { color: var(--cj-dim); font-size: var(--cj-fs-micro); }
+.sp-deepgram__warning { color: var(--cj-accent-bright); font-size: var(--cj-fs-micro); }
+
+.sp-deepgram__models {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--cj-line-strong);
+}
+
+.sp-deepgram__models span {
+  padding: 7px 9px;
+  color: var(--cj-text);
+  font-size: var(--cj-fs-micro);
+}
+
+.sp-deepgram__models span + span { border-left: 1px solid var(--cj-line-strong); }
+.sp-deepgram__models b { color: var(--cj-accent-bright); font-weight: var(--cj-w-medium); }
+
 .sp-header-mode {
   color: var(--cj-dim);
   font-size: var(--cj-fs-micro);

@@ -14,6 +14,13 @@ import {
   FALLBACK_HOTKEY_STORAGE_KEY
 } from "../shared/keybind";
 import {
+  DEFAULT_PROVIDER,
+  PROVIDER_STORAGE_KEY,
+  isClientProvider,
+  readProvider,
+  saveProvider
+} from "../shared/providerSettings";
+import {
   BACKGROUND_MESSAGE,
   CLIENT_EVENT,
   CONTENT_MESSAGE,
@@ -21,6 +28,7 @@ import {
   type ActiveTabSnapshot,
   type ApplyModsResult,
   type ClientToServerEvent,
+  type ClientProvider,
   type CommandShortcutInfo,
   type ConsoleLevel,
   type ConsoleLogEntry,
@@ -288,6 +296,7 @@ export default function App() {
   });
   const [commandShortcuts, setCommandShortcuts] = useState<CommandShortcutInfo[]>([]);
   const [fallbackHotkey, setFallbackHotkeyState] = useState(DEFAULT_FALLBACK_HOTKEY);
+  const [provider, setProviderState] = useState<ClientProvider>(DEFAULT_PROVIDER);
 
   const socketRef = useRef<WebSocket | null>(null);
   const pendingOpenRef = useRef<Promise<WebSocket> | null>(null);
@@ -296,17 +305,43 @@ export default function App() {
   const hydratedRef = useRef(false);
   const projectIdRef = useRef(projectId);
   const streamAccumRef = useRef<string>("");
-  const submitChatRef = useRef<((query: string) => Promise<void>) | null>(null);
+  const submitChatRef = useRef<((query: string, modId?: string, voiceTurn?: boolean) => Promise<void>) | null>(null);
+  const voiceTurnRef = useRef(false);
+  const spokenAckRef = useRef("");
+  const lastVoiceTranscriptRef = useRef<{ text: string; at: number } | null>(null);
 
   const handleVoiceTranscript = useCallback((text: string) => {
+    const normalized = text.trim().replace(/\s+/g, " ").toLowerCase();
+    const previous = lastVoiceTranscriptRef.current;
+    const now = Date.now();
+    if (previous?.text === normalized && now - previous.at < 3_000) return;
+    lastVoiceTranscriptRef.current = { text: normalized, at: now };
     // Voice always sends directly to the backend — never enters planning UI
-    void submitChatRef.current?.(text);
+    void submitChatRef.current?.(text, undefined, true);
   }, []);
-  const { voiceState, voiceError, barAmplitudes, activateMic, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
+  const { deepgramStatus, voiceState, voiceError, barAmplitudes, activateMic, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
 
   useEffect(() => {
     projectIdRef.current = projectId;
   }, [projectId]);
+
+  const setProvider = useCallback((nextProvider: ClientProvider) => {
+    setProviderState(nextProvider);
+    void saveProvider(nextProvider).catch(captureException);
+  }, []);
+
+  useEffect(() => {
+    void readProvider().then(setProviderState).catch(captureException);
+    const handleStorageChange = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      areaName: string
+    ) => {
+      const next = changes[PROVIDER_STORAGE_KEY]?.newValue;
+      if (areaName === "local" && isClientProvider(next)) setProviderState(next);
+    };
+    chrome.storage?.onChanged?.addListener(handleStorageChange);
+    return () => chrome.storage?.onChanged?.removeListener(handleStorageChange);
+  }, []);
 
   const addSystemMessage = useCallback((content: string) => {
     setMessages((current) => [
@@ -321,10 +356,6 @@ export default function App() {
 
   const openTraceTab = useCallback(async () => {
     await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.OPEN_TRACE_TAB });
-  }, []);
-
-  const openSettingsTab = useCallback(async () => {
-    await safeRuntimeMessage({ type: BACKGROUND_MESSAGE.OPEN_SETTINGS_TAB });
   }, []);
 
   const requestCommandBar = useCallback(async () => {
@@ -364,13 +395,9 @@ export default function App() {
         void openTraceTab();
         return;
       }
-      if (nextMode === "settings") {
-        void openSettingsTab();
-        return;
-      }
       setMode(nextMode);
     },
-    [openDesignTab, openSettingsTab, openTraceTab]
+    [openDesignTab, openTraceTab]
   );
 
   const selectWorkspace = useCallback(
@@ -383,13 +410,9 @@ export default function App() {
         void openTraceTab();
         return;
       }
-      if (workspaceId === "settings") {
-        void openSettingsTab();
-        return;
-      }
-      setMode("home");
+      setMode(workspaceId === "settings" ? "settings" : "home");
     },
-    [openDesignTab, openSettingsTab, openTraceTab]
+    [openDesignTab, openTraceTab]
   );
 
   const appendTrace = useCallback((entry: Omit<TraceEntry, "id" | "timestamp">) => {
@@ -548,7 +571,11 @@ export default function App() {
 
   const finalizeAssistant = useCallback((content?: string) => {
     const fullText = content || streamAccumRef.current;
+    const shouldSpeak = voiceTurnRef.current;
+    const spokenAck = spokenAckRef.current;
     streamAccumRef.current = "";
+    voiceTurnRef.current = false;
+    spokenAckRef.current = "";
 
     setMessages((current) =>
       current.map((message) =>
@@ -559,10 +586,14 @@ export default function App() {
     );
     currentAssistantIdRef.current = null;
 
-    if (!fullText) return;
+    if (!fullText || !shouldSpeak) return;
+
+    const unspokenText = spokenAck && fullText.startsWith(spokenAck)
+      ? fullText.slice(spokenAck.length).trim()
+      : fullText;
 
     // Build concise spoken summary (1-2 sentences, ≤ 160 chars)
-    const forTTS = fullText
+    const forTTS = unspokenText
       .replace(/\*\*Plan:\*\*[\s\S]*/, "")
       .replace(/```[\s\S]*?```/g, "")
       .replace(/`[^`]+`/g, "")
@@ -747,6 +778,10 @@ export default function App() {
           return;
         case SERVER_EVENT.CONTENT:
           appendAssistantContent(event.content);
+          if (event.phase === "ack" && voiceTurnRef.current) {
+            spokenAckRef.current += event.content;
+            void speakText(event.content.trim());
+          }
           return;
         case SERVER_EVENT.TOOL_START:
           setTools((current) => [
@@ -917,6 +952,7 @@ export default function App() {
       handleRequestConsoleLogs,
       handleRequestTabContent,
       openTraceTab,
+      speakText,
       settleRunningTrace
     ]
   );
@@ -967,7 +1003,9 @@ export default function App() {
   }, [handleServerEvent, projectId]);
 
   const submitChat = useCallback(
-    async (query: string, modId?: string) => {
+    async (query: string, modId?: string, voiceTurn = false) => {
+      voiceTurnRef.current = voiceTurn;
+      spokenAckRef.current = "";
       currentAssistantIdRef.current = null;
       streamAccumRef.current = "";
       const startedAt = Date.now();
@@ -982,7 +1020,6 @@ export default function App() {
           modId
         }
       ]);
-      setMode("trace");
       setShowCommand(false);
       setAgentRun({
         active: true,
@@ -1010,6 +1047,7 @@ export default function App() {
             query,
             conversation_id: conversationId,
             active_tabs: tabs,
+            provider,
             ...(modId ? { mod_id: modId } : {})
           } satisfies ClientToServerEvent)
         );
@@ -1019,7 +1057,7 @@ export default function App() {
         addSystemMessage(error instanceof Error ? error.message : String(error));
       }
     },
-    [addSystemMessage, conversationId, getActiveTabs, openSocket]
+    [addSystemMessage, conversationId, getActiveTabs, openSocket, provider]
   );
 
   const handleSubmit = async (event: FormEvent) => {
@@ -1224,7 +1262,9 @@ export default function App() {
         ? "Claude"
         : agentRun.provider === "nemotron"
           ? "Nemotron"
-          : "Agent";
+          : provider === "groq"
+            ? "Groq"
+            : "Claude";
 
   const activeMods = useMemo(() => mods.filter((mod) => mod.status === "active"), [mods]);
   const latestUser = useMemo(
@@ -1297,6 +1337,8 @@ export default function App() {
     setPlanningCustom,
     selectedPlanningOption,
     runPlanningBuild,
+    provider,
+    setProvider,
     uiSettings,
     toggleUiSetting,
     setUiSettings,
@@ -1317,6 +1359,7 @@ export default function App() {
       else setShowCommand(false);
     },
     handleCommandSubmit,
+    deepgramStatus,
     voiceState,
     voiceError,
     barAmplitudes,
@@ -1332,7 +1375,7 @@ export default function App() {
         <aside className="conjure-panel" aria-label="Conjure command interface">
           <StatusBar
             workspaces={panelModes}
-            activeId="home"
+            activeId={mode}
             onSelect={selectWorkspace}
             onBrand={() => void requestCommandBar()}
             right={

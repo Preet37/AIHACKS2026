@@ -12,6 +12,15 @@ _TTS_URL = "https://api.deepgram.com/v1/speak"
 _DEFAULT_TTS_MODEL = "aura-asteria-en"
 
 
+def status() -> dict[str, str | bool]:
+    """Public, secret-free Deepgram configuration status for the extension UI."""
+    return {
+        "configured": bool(os.getenv("DEEPGRAM_API_KEY", "").strip()),
+        "stt_model": "nova-2",
+        "tts_model": os.getenv("DEEPGRAM_TTS_MODEL", _DEFAULT_TTS_MODEL),
+    }
+
+
 def _api_key() -> str:
     # Read lazily so the key is picked up even if .env loads after import.
     key = os.getenv("DEEPGRAM_API_KEY", "")

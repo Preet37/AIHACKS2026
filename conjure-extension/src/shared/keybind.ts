@@ -16,7 +16,7 @@ const MODIFIER_ORDER = ["Ctrl", "Alt", "Shift", "Command"];
 
 export const normalizeHotkey = (value: string) => {
   const parts = value
-    .split("+")
+    .split(/\s*\+\s*|\s+/)
     .map((part) => part.trim())
     .filter(Boolean);
   if (!parts.length) return DEFAULT_FALLBACK_HOTKEY;

@@ -92,7 +92,7 @@ export function CommandInput({
           className={`cj-cmd__mic${voiceState !== "idle" ? " cj-cmd__mic--active" : ""}`}
           onClick={onMic}
           aria-label="Voice input"
-          title="Hold Alt / Option to talk"
+          title={voiceState === "speaking" ? "Interrupt and listen" : "Hold Alt / Option to talk"}
         >
           {micIcon}
         </button>

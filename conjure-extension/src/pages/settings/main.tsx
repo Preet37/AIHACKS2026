@@ -6,7 +6,13 @@ import {
   FALLBACK_HOTKEY_STORAGE_KEY
 } from "../../shared/keybind";
 import {
+  DEFAULT_PROVIDER,
+  readProvider,
+  saveProvider
+} from "../../shared/providerSettings";
+import {
   BACKGROUND_MESSAGE,
+  type ClientProvider,
   type CommandShortcutInfo,
   type RuntimeRequest,
   type RuntimeResult
@@ -38,6 +44,7 @@ function SettingsPage() {
   const [projectId, setProjectId] = useState("local-demo");
   const [commandShortcuts, setCommandShortcuts] = useState<CommandShortcutInfo[]>([]);
   const [fallbackHotkey, setFallbackHotkeyState] = useState(DEFAULT_FALLBACK_HOTKEY);
+  const [provider, setProviderState] = useState<ClientProvider>(DEFAULT_PROVIDER);
 
   const refreshCommandShortcuts = useCallback(async () => {
     const response = await sendRuntimeMessage<CommandShortcutInfo[]>({
@@ -51,6 +58,11 @@ function SettingsPage() {
     chrome.storage?.local?.set({ [FALLBACK_HOTKEY_STORAGE_KEY]: value }).catch(() => undefined);
   }, []);
 
+  const setProvider = useCallback((nextProvider: ClientProvider) => {
+    setProviderState(nextProvider);
+    void saveProvider(nextProvider);
+  }, []);
+
   useEffect(() => {
     chrome.storage?.local
       ?.get(FALLBACK_HOTKEY_STORAGE_KEY)
@@ -60,6 +72,7 @@ function SettingsPage() {
       })
       .catch(() => undefined);
     void refreshCommandShortcuts();
+    void readProvider().then(setProviderState).catch(() => undefined);
   }, [refreshCommandShortcuts]);
 
   const surface = useMemo(
@@ -73,6 +86,8 @@ function SettingsPage() {
       });
       return {
         ...base,
+        provider,
+        setProvider,
         commandShortcuts,
         fallbackHotkey,
         setFallbackHotkey,
@@ -85,7 +100,7 @@ function SettingsPage() {
         }
       };
     },
-    [commandShortcuts, fallbackHotkey, projectId, refreshCommandShortcuts, setFallbackHotkey, uiSettings]
+    [commandShortcuts, fallbackHotkey, projectId, provider, refreshCommandShortcuts, setFallbackHotkey, setProvider, uiSettings]
   );
 
   return (

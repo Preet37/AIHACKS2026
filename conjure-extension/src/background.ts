@@ -437,7 +437,22 @@ const openExtensionTab = async (page: "design.html" | "run.html"): Promise<Runti
 
 const openSettingsTab = async (): Promise<RuntimeResult<{ opened: boolean }>> => {
   if (!isRuntimeAvailable()) return { ok: false, error: "Extension runtime is unavailable." };
-  await chrome.runtime.openOptionsPage();
+  const settingsUrl = chrome.runtime.getURL("settings.html");
+  const existing = await chrome.tabs.query({ url: settingsUrl });
+  const settingsTab = existing[0];
+  if (settingsTab?.windowId != null) {
+    await chrome.windows.update(settingsTab.windowId, { focused: true });
+    if (settingsTab.id != null) await chrome.tabs.update(settingsTab.id, { active: true });
+    return { ok: true, data: { opened: true } };
+  }
+
+  await chrome.windows.create({
+    url: settingsUrl,
+    type: "popup",
+    width: 720,
+    height: 780,
+    focused: true
+  });
   return { ok: true, data: { opened: true } };
 };
 

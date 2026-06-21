@@ -3,7 +3,7 @@
 // slice it needs via useSurface(). This lets surfaces live in separate files
 // (composing §6 primitives) without 100-line prop drilling.
 import { createContext, useContext, type Dispatch, type FormEvent, type RefObject, type SetStateAction } from "react";
-import type { ActiveTabSnapshot, AgentProvider, AgentPullRequest, CommandShortcutInfo, ModRecord } from "../shared/messages";
+import type { ActiveTabSnapshot, AgentProvider, AgentPullRequest, ClientProvider, CommandShortcutInfo, ModRecord } from "../shared/messages";
 import type { FinderSlice } from "./useFinder";
 
 export type PanelMode = "home" | "planning" | "design" | "trace" | "settings";
@@ -116,6 +116,8 @@ export interface SurfaceContextValue {
   runPlanningBuild: () => void;
 
   // settings
+  provider: ClientProvider;
+  setProvider: (provider: ClientProvider) => void;
   uiSettings: UiSettings;
   toggleUiSetting: (key: keyof UiSettings) => void;
   setUiSettings: Dispatch<SetStateAction<UiSettings>>;
@@ -139,6 +141,7 @@ export interface SurfaceContextValue {
   handleCommandSubmit: (query: string) => void;
 
   // voice
+  deepgramStatus: "checking" | "ready" | "missing" | "offline";
   voiceState: "idle" | "recording" | "transcribing" | "speaking";
   voiceError: string | null;
   barAmplitudes: number[];

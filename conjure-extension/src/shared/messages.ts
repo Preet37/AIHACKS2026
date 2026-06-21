@@ -463,9 +463,13 @@ export interface ChatClientEvent {
   query: string;
   conversation_id?: string;
   active_tabs: ActiveTabSnapshot[];
+  /** Provider choice only; the backend reads its API key from .env. */
+  provider?: ClientProvider;
   /** When set, this turn edits (re-generates) the named mod. */
   mod_id?: string;
 }
+
+export type ClientProvider = "anthropic" | "groq";
 
 export interface TabContentResponseClientEvent {
   type: typeof CLIENT_EVENT.TAB_CONTENT_RESPONSE;
@@ -526,7 +530,7 @@ export type AgentProvider = "groq" | "claude" | "nemotron";
 
 export type ServerToClientEvent =
   | { type: typeof SERVER_EVENT.CONVERSATION_ID; conversation_id: string }
-  | { type: typeof SERVER_EVENT.CONTENT; content: string }
+  | { type: typeof SERVER_EVENT.CONTENT; content: string; phase?: "ack" }
   | ToolStatusEvent
   | { type: typeof SERVER_EVENT.THINKING }
   | {

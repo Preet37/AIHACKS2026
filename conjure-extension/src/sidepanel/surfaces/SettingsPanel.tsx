@@ -9,6 +9,10 @@ import "./Settings.css";
 
 export function SettingsPanel() {
   const {
+    provider,
+    setProvider,
+    deepgramStatus,
+    voiceState,
     uiSettings,
     toggleUiSetting,
     projectId,
@@ -30,11 +34,70 @@ export function SettingsPanel() {
     { key: "calendar" as const, label: "Calendar" }
   ];
   const commandShortcut = commandShortcuts.find((command) => command.name === "toggle-command-bar");
-  const commandState = commandShortcut?.shortcut ? "active" : commandShortcut ? "pending" : "pending";
-  const commandLabel = commandShortcut?.shortcut || "unassigned";
+  const commandLabel = commandShortcut?.shortcut || normalizeHotkey(fallbackHotkey);
+  const commandState = commandLabel ? "active" : "pending";
 
   return (
     <div className="sp-stack" aria-label="Settings">
+
+      <Pane name="AGENT" surface ariaLabel="Agent provider">
+        <div className="sp-pane-body">
+          <div className="sp-row">
+            <span className="sp-row-label">Provider</span>
+            <div className="sp-segment" role="group" aria-label="Agent provider">
+              {(["anthropic", "groq"] as const).map((candidate) => (
+                <button
+                  key={candidate}
+                  type="button"
+                  className={`sp-seg-btn${provider === candidate ? " sp-seg-btn--active" : ""}`}
+                  aria-pressed={provider === candidate}
+                  onClick={() => setProvider(candidate)}
+                >
+                  {candidate === "anthropic" ? "Anthropic" : "Groq"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="sp-kv-row">
+            <span className="sp-kv-key">KEY</span>
+            <span className="sp-kv-val">loaded from backend .env</span>
+          </div>
+        </div>
+      </Pane>
+
+      <Pane
+        name="VOICE · DEEPGRAM"
+        surface
+        className="sp-deepgram"
+        ariaLabel="Deepgram voice"
+        headerRight={
+          <span className="sp-conn-status">
+            <StatusBlock
+              state={deepgramStatus === "ready" ? "active" : deepgramStatus === "checking" ? "done" : "pending"}
+              pulse={deepgramStatus === "checking" || voiceState !== "idle"}
+              label={`Deepgram ${deepgramStatus}`}
+            />
+            <span>{deepgramStatus}</span>
+          </span>
+        }
+      >
+        <div className="sp-deepgram__body">
+          <div className="sp-deepgram__brand">DEEPGRAM</div>
+          <p className="sp-deepgram__copy">
+            Real-time voice input and interruptible assistant speech.
+          </p>
+          <div className="sp-deepgram__models">
+            <span><b>STT</b> Nova-2</span>
+            <span><b>TTS</b> Aura Asteria</span>
+          </div>
+          <div className="sp-deepgram__hint">
+            Hold Alt/Option to talk. Press it again while Conjure speaks to interrupt and listen.
+          </div>
+          {deepgramStatus === "missing" ? (
+            <div className="sp-deepgram__warning">Set DEEPGRAM_API_KEY in the backend .env, then restart it.</div>
+          ) : null}
+        </div>
+      </Pane>
 
       {/* CONNECTORS ─────────────────────────────────────────────────────── */}
       <Pane name="CONNECTORS" surface ariaLabel="Connectors">

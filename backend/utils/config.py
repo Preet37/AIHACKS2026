@@ -73,7 +73,13 @@ class Settings:
 
     @property
     def effective_demo_mode(self) -> bool:
-        return self.demo_mode or not self.anthropic_api_key
+        if self.demo_mode:
+            return True
+        if self.agent_provider == "groq":
+            return not self.groq_api_key
+        if self.agent_provider == "nemotron":
+            return not self.nvidia_api_key
+        return not self.anthropic_api_key
 
     @property
     def active_provider(self) -> AgentProvider:
