@@ -11,6 +11,7 @@ export function SettingsPanel() {
   const {
     provider,
     setProvider,
+    clearConversation,
     deepgramStatus,
     voiceState,
     uiSettings,
@@ -220,6 +221,21 @@ export function SettingsPanel() {
             <Button type="button" variant="primary" onClick={testCommandOverlay}>
               [ test overlay ]
             </Button>
+          </div>
+        </div>
+      </Pane>
+
+      <Pane name="DATA" surface ariaLabel="Conversation data">
+        <div className="sp-pane-body">
+          <div className="sp-row">
+            <span className="sp-row-label">Conversation cache</span>
+            <Button type="button" onClick={clearConversation}>
+              [ clear conversation ]
+            </Button>
+          </div>
+          <div className="sp-kv-row">
+            <span className="sp-kv-key">KEEPS</span>
+            <span className="sp-kv-val">mods, provider, and extension settings</span>
           </div>
         </div>
       </Pane>

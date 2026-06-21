@@ -110,6 +110,7 @@ export const createStaticSurfaceValue = ({
     runPlanningBuild: noop,
     provider: "anthropic",
     setProvider: noop,
+    clearConversation: noop,
     uiSettings,
     toggleUiSetting: (key) => {
       setUiSettings((current) => {

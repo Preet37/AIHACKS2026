@@ -118,6 +118,7 @@ export interface SurfaceContextValue {
   // settings
   provider: ClientProvider;
   setProvider: (provider: ClientProvider) => void;
+  clearConversation: () => void;
   uiSettings: UiSettings;
   toggleUiSetting: (key: keyof UiSettings) => void;
   setUiSettings: Dispatch<SetStateAction<UiSettings>>;

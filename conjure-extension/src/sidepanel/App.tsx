@@ -124,6 +124,13 @@ initSentry();
 const makeId = () =>
   globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
+const makeWelcomeMessage = (): ChatMessage => ({
+  id: makeId(),
+  role: "assistant",
+  content: "Tell me what to build for this browser. I will route the work to the configured agent and keep progress visible here.",
+  createdAt: Date.now()
+});
+
 const captureException = (error: unknown) => {
   if (CONJURE_CONFIG.sentry.enabled) {
     Sentry.captureException(error);
@@ -260,14 +267,7 @@ export default function App() {
   const [projectId, setProjectId] = useState(CONJURE_CONFIG.projectId);
   const [conversationId, setConversationId] = useState<string>();
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: makeId(),
-      role: "assistant",
-      content: "Tell me what to build for this browser. I will route the work to the configured agent and keep progress visible here.",
-      createdAt: Date.now()
-    }
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [makeWelcomeMessage()]);
   const [activeTabs, setActiveTabs] = useState<ActiveTabSnapshot[]>([]);
   const [agentRun, setAgentRun] = useState<AgentRunState>({
     active: false,
@@ -306,6 +306,7 @@ export default function App() {
   const projectIdRef = useRef(projectId);
   const streamAccumRef = useRef<string>("");
   const submitChatRef = useRef<((query: string, modId?: string, voiceTurn?: boolean) => Promise<void>) | null>(null);
+  const wakeAgentRef = useRef<() => void>(() => {});
   const voiceTurnRef = useRef(false);
   const spokenAckRef = useRef("");
   const lastVoiceTranscriptRef = useRef<{ text: string; at: number } | null>(null);
@@ -316,10 +317,29 @@ export default function App() {
     const now = Date.now();
     if (previous?.text === normalized && now - previous.at < 3_000) return;
     lastVoiceTranscriptRef.current = { text: normalized, at: now };
+
+    // Treat "agent" as a wake phrase instead of sending it as an empty chat
+    // request. A command spoken in the same breath runs immediately.
+    const wakeMatch = text.trim().match(/^(?:hey\s+)?(?:agent|conjure)\b(?:\s+mode)?(?:[,:;.!?]+\s*|\s+)?(.*)$/i);
+    if (wakeMatch) {
+      const command = wakeMatch[1].trim();
+      if (!command) {
+        wakeAgentRef.current();
+        return;
+      }
+      void submitChatRef.current?.(command, undefined, true);
+      return;
+    }
+
     // Voice always sends directly to the backend — never enters planning UI
     void submitChatRef.current?.(text, undefined, true);
   }, []);
   const { deepgramStatus, voiceState, voiceError, barAmplitudes, activateMic, speakText } = useVoice({ onTranscript: handleVoiceTranscript });
+
+  wakeAgentRef.current = () => {
+    setStatusText("Agent listening");
+    void speakText("I'm listening.", { autoListen: true });
+  };
 
   useEffect(() => {
     projectIdRef.current = projectId;
@@ -529,6 +549,40 @@ export default function App() {
   // "Find on this page" off-device browser agent. Owns its own state machine;
   // App only routes find-shaped commands to it (see handleSubmit below).
   const finder = useFinder(captureException);
+
+  const clearConversation = useCallback(() => {
+    socketRef.current?.close();
+    socketRef.current = null;
+    pendingOpenRef.current = null;
+    currentAssistantIdRef.current = null;
+    streamAccumRef.current = "";
+    voiceTurnRef.current = false;
+    spokenAckRef.current = "";
+    setConversationId(undefined);
+    setMessages([makeWelcomeMessage()]);
+    setInput("");
+    setTools([]);
+    setTraceEntries([]);
+    setRunStartedAt(undefined);
+    setAgentRun({
+      active: false,
+      phrase: "Waiting for an agent run.",
+      pullRequests: []
+    });
+    finder.clear();
+    setStatusText("Conversation cleared");
+
+    const chromeApi = getChromeApi();
+    if (chromeApi?.storage?.local) {
+      void chromeApi.storage.local.remove(SESSION_STORAGE_KEY).catch(captureException);
+    } else {
+      try {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+      } catch (error) {
+        captureException(error);
+      }
+    }
+  }, [finder]);
 
   // Proactive backend reachability (GET /health), shown in the status bar.
   const backendHealth = useBackendHealth();
@@ -1339,6 +1393,7 @@ export default function App() {
     runPlanningBuild,
     provider,
     setProvider,
+    clearConversation,
     uiSettings,
     toggleUiSetting,
     setUiSettings,
