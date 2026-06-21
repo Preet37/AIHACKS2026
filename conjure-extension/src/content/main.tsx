@@ -3,10 +3,12 @@ import { CONJURE_CONFIG } from "../shared/config";
 import {
   BACKGROUND_MESSAGE,
   CONTENT_MESSAGE,
+  PAGE_HOOK_SOURCE,
   type ApplyVisualEditMessage,
   type CommitVisualEditsMessage,
   type ConsoleLevel,
   type DiscardVisualEditsMessage,
+  type GeneratedModErrorMessage,
   type GetElementHtmlMessage,
   type GetPageContentMessage,
   type PageContentResult,
@@ -28,8 +30,6 @@ declare global {
     __CONJURE_PAGE_HOOKED__?: boolean;
   }
 }
-
-const PAGE_HOOK_SOURCE = "conjure-page-hook";
 
 const initSentry = () => {
   if (!CONJURE_CONFIG.sentry.enabled) return;
@@ -2024,6 +2024,16 @@ const discardVisualEdits = (_message: DiscardVisualEditsMessage): RuntimeResult<
 
 window.addEventListener("message", (event) => {
   if (event.source !== window || event.data?.source !== PAGE_HOOK_SOURCE) return;
+  if (event.data?.type === CONTENT_MESSAGE.GENERATED_MOD_ERROR) {
+    chrome.runtime
+      .sendMessage({
+        type: CONTENT_MESSAGE.GENERATED_MOD_ERROR,
+        payload: event.data.payload
+      } satisfies GeneratedModErrorMessage)
+      .catch(() => undefined);
+    return;
+  }
+
   chrome.runtime
     .sendMessage({
       type: CONTENT_MESSAGE.CONSOLE_EVENT,

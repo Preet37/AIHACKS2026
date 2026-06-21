@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/browser";
+import { buildGeneratedModUserScriptCode } from "./generatedModWrapper";
 import { CONJURE_CONFIG } from "./shared/config";
 import {
   BACKGROUND_MESSAGE,
@@ -13,6 +14,9 @@ import {
   type ContentConsoleEventMessage,
   type DiscardVisualEditsMessage,
   type GeneratedBundle,
+  type GeneratedModErrorMessage,
+  type GeneratedModErrorPayload,
+  type GeneratedModErrorSource,
   type GetConsoleLogsMessage,
   type RemoveModMessage,
   type RuntimeRequest,
@@ -35,8 +39,22 @@ type UserScriptsApi = {
   configureWorld?: (props: Record<string, unknown>) => Promise<void>;
 };
 
+type RuntimeMessageListener = (
+  message: unknown,
+  sender: chrome.runtime.MessageSender,
+  sendResponse: (response?: unknown) => void
+) => boolean | void;
+
+type RuntimeUserScriptMessageEvent = {
+  addListener: (listener: RuntimeMessageListener) => void;
+};
+
 const getUserScriptsApi = (): UserScriptsApi | undefined =>
   (chrome as unknown as { userScripts?: UserScriptsApi }).userScripts;
+
+const getUserScriptMessageEvent = (): RuntimeUserScriptMessageEvent | undefined =>
+  (chrome.runtime as unknown as { onUserScriptMessage?: RuntimeUserScriptMessageEvent })
+    .onUserScriptMessage;
 
 const modScriptId = (modId: string) => `${MOD_SCRIPT_PREFIX}${modId}`;
 
@@ -45,114 +63,6 @@ const VALID_RUN_AT = new Set(["document_start", "document_end", "document_idle"]
 const userScriptsUnavailableError =
   "Conjure can't auto-apply yet. Open chrome://extensions, find Conjure, and turn on " +
   "“Allow user scripts” (or enable Developer mode), then reload Conjure.";
-
-/**
- * Build a single self-contained user-script string from the generated bundle.
- * The CSS is embedded as a JSON literal and injected as a <style> element, then
- * the generated JS runs. Both pieces are produced by the agent.
- */
-const buildUserScriptCode = (bundle: GeneratedBundle, scriptId: string): string => {
-  const cssLiteral = JSON.stringify(bundle.css || "");
-  const idLiteral = JSON.stringify(scriptId);
-  const modIdLiteral = JSON.stringify(bundle.mod_id || scriptId);
-  return [
-    "(function () {",
-    `  var __conjureCss = ${cssLiteral};`,
-    "  if (__conjureCss && __conjureCss.trim()) {",
-    "    var __existing = document.querySelector('style[data-conjure=' + JSON.stringify(" + idLiteral + ") + ']');",
-    "    if (!__existing) {",
-    "      var __style = document.createElement('style');",
-    `      __style.setAttribute('data-conjure', ${idLiteral});`,
-    "      __style.textContent = __conjureCss;",
-    "      (document.head || document.documentElement).appendChild(__style);",
-    "    }",
-    "  }",
-    "})();",
-    "(function () {",
-    `  var __conjureModId = ${modIdLiteral};`,
-    "  var __conjureCounter = 0;",
-    "  var __originalCreateElement = document.createElement.bind(document);",
-    "  var __originalCreateElementNS = document.createElementNS.bind(document);",
-    "  var __tagNode = function (node) {",
-    "    try {",
-    "      if (!__conjureModId || !node) return node;",
-    "      var nodes = [];",
-    "      if (node.nodeType === 1) nodes.push(node);",
-    "      if (node.nodeType === 11 || node.nodeType === 1) {",
-    "        var children = node.querySelectorAll ? node.querySelectorAll('*') : [];",
-    "        for (var index = 0; index < children.length; index += 1) nodes.push(children[index]);",
-    "      }",
-    "      for (var itemIndex = 0; itemIndex < nodes.length; itemIndex += 1) {",
-    "        var element = nodes[itemIndex];",
-    "        if (!element.setAttribute) continue;",
-    "        if (!element.hasAttribute('data-conjure-mod-id')) {",
-    "          element.setAttribute('data-conjure-mod-id', __conjureModId);",
-    "        }",
-    "        if (!element.hasAttribute('data-conjure-owned')) {",
-    "          element.setAttribute('data-conjure-owned', 'true');",
-    "        }",
-    "        if (!element.hasAttribute('data-conjure-element-id')) {",
-    "          __conjureCounter += 1;",
-    "          element.setAttribute('data-conjure-element-id', __conjureModId + '-' + __conjureCounter);",
-    "        }",
-    "      }",
-    "    } catch (_error) {",
-    "      return node;",
-    "    }",
-    "    return node;",
-    "  };",
-    "  window.__CONJURE_TAG_DOM_NODE__ = __tagNode;",
-    "  window.__CONJURE_INSTALL_DOM_TAG_OBSERVER__ = function () {",
-    "    if (typeof MutationObserver === 'undefined') return;",
-    "    var root = document.documentElement || document.body;",
-    "    if (!root) return;",
-    "    var observer = new MutationObserver(function (mutations) {",
-    "      for (var mutationIndex = 0; mutationIndex < mutations.length; mutationIndex += 1) {",
-    "        var mutation = mutations[mutationIndex];",
-    "        var target = mutation.target;",
-    "        var ownedTarget = target && target.closest ? target.closest('[data-conjure-mod-id=\"' + __conjureModId + '\"]') : null;",
-    "        if (!ownedTarget) continue;",
-    "        for (var nodeIndex = 0; nodeIndex < mutation.addedNodes.length; nodeIndex += 1) {",
-    "          __tagNode(mutation.addedNodes[nodeIndex]);",
-    "        }",
-    "      }",
-    "    });",
-    "    observer.observe(root, { childList: true, subtree: true });",
-    "  };",
-    "  document.createElement = function () {",
-    "    return __tagNode(__originalCreateElement.apply(document, arguments));",
-    "  };",
-    "  document.createElementNS = function () {",
-    "    return __tagNode(__originalCreateElementNS.apply(document, arguments));",
-    "  };",
-    "  window.__CONJURE_RESTORE_DOM_TAGGING__ = function () {",
-    "    document.createElement = __originalCreateElement;",
-    "    document.createElementNS = __originalCreateElementNS;",
-    "    delete window.__CONJURE_RESTORE_DOM_TAGGING__;",
-    "    delete window.__CONJURE_TAG_DOM_NODE__;",
-    "    delete window.__CONJURE_INSTALL_DOM_TAG_OBSERVER__;",
-    "  };",
-    "  window.setTimeout(function () {",
-    "    if (window.__CONJURE_RESTORE_DOM_TAGGING__) window.__CONJURE_RESTORE_DOM_TAGGING__();",
-    "  }, 1000);",
-    "})();",
-    bundle.js || "",
-    "(function () {",
-    `  var __conjureModId = ${modIdLiteral};`,
-    "  var __tagNode = window.__CONJURE_TAG_DOM_NODE__;",
-    "  if (__tagNode) {",
-    "    var __owned = document.querySelectorAll('[data-conjure-mod-id]');",
-    "    for (var __index = 0; __index < __owned.length; __index += 1) {",
-    "      if (__owned[__index].getAttribute('data-conjure-mod-id') === __conjureModId) {",
-    "        __tagNode(__owned[__index]);",
-    "      }",
-    "    }",
-    "  }",
-    "  if (window.__CONJURE_INSTALL_DOM_TAG_OBSERVER__) window.__CONJURE_INSTALL_DOM_TAG_OBSERVER__();",
-    "  if (window.__CONJURE_RESTORE_DOM_TAGGING__) window.__CONJURE_RESTORE_DOM_TAGGING__();",
-    "})();"
-  ].join("\n");
-};
 
 const reloadMatchingTabs = async (matches: string[]): Promise<number> => {
   const patterns = matches.filter((pattern) => pattern && pattern !== "<all_urls>");
@@ -188,8 +98,21 @@ const unregisterStaleMods = async (
   return removed;
 };
 
+const configureUserScriptsMessaging = async (userScripts: UserScriptsApi): Promise<void> => {
+  if (!userScripts.configureWorld) return;
+  try {
+    await userScripts.configureWorld({ messaging: true });
+  } catch {
+    // Messaging is preferred, but the postMessage bridge keeps reporting best effort.
+  }
+};
+
 /** Register/refresh one mod as a persistent user script. */
-const registerMod = async (userScripts: UserScriptsApi, bundle: GeneratedBundle): Promise<boolean> => {
+const registerMod = async (
+  userScripts: UserScriptsApi,
+  bundle: GeneratedBundle,
+  projectId?: string
+): Promise<boolean> => {
   if (!bundle.mod_id || !bundle.matches?.length) return false;
   const scriptId = modScriptId(bundle.mod_id);
   const runAt = VALID_RUN_AT.has(bundle.run_at) ? bundle.run_at : "document_idle";
@@ -201,7 +124,7 @@ const registerMod = async (userScripts: UserScriptsApi, bundle: GeneratedBundle)
     {
       id: scriptId,
       matches: bundle.matches,
-      js: [{ code: buildUserScriptCode(bundle, scriptId) }],
+      js: [{ code: buildGeneratedModUserScriptCode({ bundle, projectId, scriptId }) }],
       runAt,
       world: "USER_SCRIPT"
     }
@@ -221,12 +144,14 @@ const applyMods = async (message: ApplyModsMessage): Promise<RuntimeResult<Apply
 
   const bundles = (message.bundles || []).filter((bundle) => bundle.mod_id);
   const keepIds = new Set(bundles.map((bundle) => modScriptId(bundle.mod_id as string)));
+  const projectId = message.projectId || CONJURE_CONFIG.projectId;
 
   let applied = 0;
   const matchesToReload = new Set<string>();
   try {
+    await configureUserScriptsMessaging(userScripts);
     for (const bundle of bundles) {
-      if (await registerMod(userScripts, bundle)) {
+      if (await registerMod(userScripts, bundle, projectId)) {
         applied += 1;
         bundle.matches.forEach((pattern) => matchesToReload.add(pattern));
       }
@@ -284,8 +209,115 @@ initSentry();
 
 const captureException = (error: unknown) => {
   if (CONJURE_CONFIG.sentry.enabled) {
-    Sentry.captureException(error);
+    try {
+      Sentry.captureException(error);
+    } catch {
+      // Sentry is optional and must never break extension behavior.
+    }
   }
+};
+
+const generatedModErrorSources = new Set<GeneratedModErrorSource>([
+  "sync",
+  "event_listener",
+  "timer",
+  "interval",
+  "animation_frame",
+  "promise_rejection"
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const stringValue = (value: unknown): string => (typeof value === "string" ? value : "");
+
+const tagValue = (value: string): string =>
+  value.replace(/\s+/g, " ").trim().slice(0, 200) || "unknown";
+
+const normalizeGeneratedModErrorPayload = (
+  payload: unknown,
+  sender: chrome.runtime.MessageSender
+): GeneratedModErrorPayload | null => {
+  if (!isRecord(payload)) return null;
+
+  const source = stringValue(payload.source);
+  if (!generatedModErrorSources.has(source as GeneratedModErrorSource)) return null;
+
+  const modId = stringValue(payload.modId);
+  if (!modId) return null;
+
+  const normalized: GeneratedModErrorPayload = {
+    projectId: stringValue(payload.projectId) || CONJURE_CONFIG.projectId,
+    scriptId: stringValue(payload.scriptId) || modScriptId(modId),
+    modId,
+    modName: stringValue(payload.modName) || "Conjure customization",
+    url: stringValue(payload.url) || sender.url || sender.tab?.url || "",
+    message: stringValue(payload.message) || "Generated mod error",
+    stack: stringValue(payload.stack),
+    source: source as GeneratedModErrorSource
+  };
+
+  if (typeof payload.line === "number" && Number.isFinite(payload.line)) {
+    normalized.line = payload.line;
+  }
+  if (typeof payload.column === "number" && Number.isFinite(payload.column)) {
+    normalized.column = payload.column;
+  }
+
+  return normalized;
+};
+
+const generatedModErrorFromPayload = (payload: GeneratedModErrorPayload): Error => {
+  const error = new Error(payload.message);
+  error.name = "GeneratedModError";
+  if (payload.stack) {
+    try {
+      error.stack = payload.stack;
+    } catch {
+      // Some runtimes expose a readonly stack; the message still groups usefully.
+    }
+  }
+  return error;
+};
+
+const captureGeneratedModError = (
+  message: GeneratedModErrorMessage,
+  sender: chrome.runtime.MessageSender
+): RuntimeResult<null> => {
+  const payload = normalizeGeneratedModErrorPayload(message.payload, sender);
+  if (!payload) {
+    return { ok: false, error: "Invalid generated mod error payload." };
+  }
+
+  if (!CONJURE_CONFIG.sentry.enabled) {
+    return { ok: true, data: null };
+  }
+
+  const error = generatedModErrorFromPayload(payload);
+  try {
+    Sentry.captureException(error, {
+      tags: {
+        "conjure.surface": "generated_mod",
+        "conjure.project_id": tagValue(payload.projectId || CONJURE_CONFIG.projectId),
+        "conjure.mod_id": tagValue(payload.modId),
+        "conjure.mod_name": tagValue(payload.modName),
+        "conjure.error_source": tagValue(payload.source)
+      },
+      extra: {
+        page_url: payload.url,
+        script_id: payload.scriptId,
+        run_source: payload.source,
+        line: payload.line,
+        column: payload.column,
+        tab_id: sender.tab?.id,
+        frame_id: sender.frameId
+      }
+    });
+  } catch {
+    // Keep generated mods running even if Sentry capture fails.
+  }
+
+  return { ok: true, data: null };
 };
 
 const makeId = () =>
@@ -409,6 +441,8 @@ const handleRuntimeMessage = async (
   switch (message.type) {
     case CONTENT_MESSAGE.CONSOLE_EVENT:
       return appendConsoleLog(message, sender);
+    case CONTENT_MESSAGE.GENERATED_MOD_ERROR:
+      return captureGeneratedModError(message, sender);
     case CONTENT_MESSAGE.VISUAL_EDIT_SELECTION:
     case CONTENT_MESSAGE.VISUAL_EDIT_PREVIEW:
     case CONTENT_MESSAGE.VISUAL_EDIT_COMMIT:
@@ -450,13 +484,30 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   consoleLogsByTab.delete(tabId);
 });
 
-chrome.runtime.onMessage.addListener((message: RuntimeRequest, sender, sendResponse) => {
-  handleRuntimeMessage(message, sender)
+const respondToRuntimeMessage = (
+  message: unknown,
+  sender: chrome.runtime.MessageSender,
+  sendResponse: (response?: unknown) => void
+) => {
+  if (!isRecord(message) || typeof message.type !== "string") {
+    sendResponse({ ok: false, error: "Unsupported runtime message." });
+    return;
+  }
+
+  handleRuntimeMessage(message as unknown as RuntimeRequest, sender)
     .then(sendResponse)
     .catch((error: unknown) => {
       captureException(error);
       sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
     });
+};
 
+chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+  respondToRuntimeMessage(message, sender, sendResponse);
+  return true;
+});
+
+getUserScriptMessageEvent()?.addListener((message, sender, sendResponse) => {
+  respondToRuntimeMessage(message, sender, sendResponse);
   return true;
 });

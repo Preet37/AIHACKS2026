@@ -1,11 +1,14 @@
 export const CONTENT_MESSAGE = {
   CONSOLE_EVENT: "conjure:console_event",
+  GENERATED_MOD_ERROR: "conjure:generated_mod_error",
   GET_PAGE_CONTENT: "conjure:get_page_content",
   GET_ELEMENT_HTML: "conjure:get_element_html",
   VISUAL_EDIT_SELECTION: "conjure:visual_edit_selection",
   VISUAL_EDIT_PREVIEW: "conjure:visual_edit_preview",
   VISUAL_EDIT_COMMIT: "conjure:visual_edit_commit"
 } as const;
+
+export const PAGE_HOOK_SOURCE = "conjure-page-hook" as const;
 
 export const BACKGROUND_MESSAGE = {
   GET_ACTIVE_TABS: "conjure:get_active_tabs",
@@ -211,6 +214,32 @@ export interface ContentConsoleEventMessage {
   };
 }
 
+export type GeneratedModErrorSource =
+  | "sync"
+  | "event_listener"
+  | "timer"
+  | "interval"
+  | "animation_frame"
+  | "promise_rejection";
+
+export interface GeneratedModErrorPayload {
+  projectId?: string;
+  scriptId?: string;
+  modId: string;
+  modName: string;
+  url: string;
+  message: string;
+  stack: string;
+  source: GeneratedModErrorSource;
+  line?: number;
+  column?: number;
+}
+
+export interface GeneratedModErrorMessage {
+  type: typeof CONTENT_MESSAGE.GENERATED_MOD_ERROR;
+  payload: GeneratedModErrorPayload;
+}
+
 export interface GetPageContentMessage {
   type: typeof CONTENT_MESSAGE.GET_PAGE_CONTENT;
   requestId?: string;
@@ -272,6 +301,7 @@ export interface ModRecord {
 
 export interface ApplyModsMessage {
   type: typeof BACKGROUND_MESSAGE.APPLY_MODS;
+  projectId?: string;
   bundles: GeneratedBundle[];
 }
 
@@ -342,6 +372,7 @@ export interface ApplyModsResult {
 
 export type RuntimeRequest =
   | ContentConsoleEventMessage
+  | GeneratedModErrorMessage
   | VisualEditSelectionMessage
   | VisualEditPreviewMessage
   | VisualEditCommitMessage
