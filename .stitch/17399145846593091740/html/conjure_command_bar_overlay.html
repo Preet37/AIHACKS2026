@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Conjure Command Palette</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Silkscreen:wght@400;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-container": "#d57a1d",
+                        "primary-container": "#8382ff",
+                        "text-primary": "#F0F0F5",
+                        "primary-fixed-dim": "#c2c1ff",
+                        "surface-container-low": "#1b1b23",
+                        "on-surface-variant": "#c7c4d7",
+                        "primary": "#c2c1ff",
+                        "secondary-fixed-dim": "#c0c1ff",
+                        "surface-bright": "#393841",
+                        "surface": "#101026",
+                        "primary-fixed": "#e2dfff",
+                        "inverse-on-surface": "#303038",
+                        "inverse-primary": "#4d4ad5",
+                        "on-primary-fixed": "#0c006a",
+                        "secondary": "#c0c1ff",
+                        "accent-bright": "#6C6AF5", /* Forced #6C6AF5 as per prompt */
+                        "on-tertiary-container": "#432100",
+                        "background": "#13131a",
+                        "inverse-surface": "#e4e1ec",
+                        "tertiary-fixed": "#ffdcc3",
+                        "on-error-container": "#ffdad6",
+                        "on-primary": "#1900a7",
+                        "secondary-fixed": "#e1e0ff",
+                        "surface-container-lowest": "#0e0d15",
+                        "on-primary-container": "#150093",
+                        "on-secondary-fixed-variant": "#3638a2",
+                        "error-container": "#93000a",
+                        "surface-container-high": "#2a2931",
+                        "on-tertiary-fixed-variant": "#6e3900",
+                        "surface-container": "#1f1f27",
+                        "text-dim": "#8A8AA4",
+                        "surface-container-highest": "#34343c",
+                        "on-primary-fixed-variant": "#342cbd",
+                        "surface-dim": "#13131a",
+                        "error": "#ffb4ab",
+                        "surface-variant": "#34343c",
+                        "on-error": "#690005",
+                        "text-faint": "#54546E",
+                        "surface-tint": "#c2c1ff",
+                        "border-hairline": "rgba(240,240,245,0.14)",
+                        "tertiary-fixed-dim": "#ffb77d",
+                        "outline": "#918fa0",
+                        "on-surface": "#e4e1ec",
+                        "on-secondary": "#1d1c8c",
+                        "on-background": "#e4e1ec",
+                        "outline-variant": "#464554",
+                        "on-secondary-fixed": "#06006c",
+                        "tertiary": "#ffb77d",
+                        "on-secondary-container": "#b0b2ff",
+                        "secondary-container": "#393ba5",
+                        "on-tertiary-fixed": "#2f1500",
+                        "on-tertiary": "#4d2600"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0px",
+                        "lg": "0px",
+                        "xl": "0px",
+                        "full": "0px"
+                    },
+                    "spacing": {
+                        "item-gap": "12px",
+                        "block-gap": "20px",
+                        "base": "11px",
+                        "window-bar-x": "10px",
+                        "window-bar-y": "6px",
+                        "container-padding": "22px"
+                    },
+                    "fontFamily": {
+                        "body-md": ["JetBrains Mono"],
+                        "wordmark": ["Silkscreen"],
+                        "micro": ["JetBrains Mono"],
+                        "metadata-key": ["JetBrains Mono"],
+                        "ui-small": ["JetBrains Mono"],
+                        "caption": ["JetBrains Mono"],
+                        "display-sm": ["Silkscreen"],
+                        "display-lg": ["Silkscreen"]
+                    },
+                    "fontSize": {
+                        "body-md": ["16px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "wordmark": ["46px", { "lineHeight": "1.0", "letterSpacing": "1px", "fontWeight": "400" }],
+                        "micro": ["10px", { "lineHeight": "1.0", "fontWeight": "400" }],
+                        "metadata-key": ["13px", { "lineHeight": "1.0", "letterSpacing": "0.14em", "fontWeight": "500" }],
+                        "ui-small": ["12px", { "lineHeight": "1.0", "fontWeight": "400" }],
+                        "caption": ["11px", { "lineHeight": "1.0", "letterSpacing": "0.1em", "fontWeight": "400" }],
+                        "display-sm": ["15px", { "lineHeight": "1.2", "fontWeight": "400" }],
+                        "display-lg": ["22px", { "lineHeight": "1.2", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .blink {
+            animation: blinker 1s linear infinite;
+        }
+        @keyframes blinker {
+            50% { opacity: 0; }
+        }
+    </style>
+</head>
+<body class="bg-background text-text-primary font-body-md h-screen w-screen overflow-hidden flex items-center justify-center relative selection:bg-accent-bright/30">
+<!-- Blurred Background Context -->
+<div class="absolute inset-0 z-0 bg-[#000000]/70 backdrop-blur-sm pointer-events-none" data-alt="A highly abstract, dark, and blurred representation of a complex dashboard interface. Features subtle grid lines and faint, unreadable terminal text faintly glowing in the deep indigo background. The overall aesthetic is strictly technical and brutalist, serving as a non-distracting atmospheric backdrop." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDPsksWHrjVZa2LyQfq5sMOZ0ZSnIzktLMdtNnoEfDoAPtBvLA8_ZcEpcmevC53_a0s8EmvzaSBtYwf_FXxEqY8PY_5uBbgYyCiXxHGdFtMSuReiMA8RCmV4Vqsb4PECLf9chVQpEw-Kw9eI3sfACmgs8utWXXtt8i5TeEYevle1LaVE3J5Y7SZml8OSyhXWWxg0PX4q9xGsiJwv8pu46xLw6btjxa7uMl4kFsCvXmljpDpIBf1p6D5qysU2PwmNa4np1hUqED-kvxX'); background-size: cover; background-position: center; opacity: 0.2;"></div>
+<!-- Command Palette Modal -->
+<div class="z-10 w-[600px] bg-[#08080F] border border-border-hairline shadow-2xl flex flex-col font-ui-small text-ui-small">
+<!-- Top Input Area -->
+<div class="flex items-center px-container-padding py-block-gap border-b border-border-hairline">
+<span class="text-accent-bright text-[16px] mr-3">■</span>
+<input autocomplete="off" autofocus="" class="bg-transparent border-none focus:ring-0 text-text-primary w-full font-body-md text-body-md placeholder-text-dim" spellcheck="false" type="text" value="block youtube shorts"/>
+<span class="text-accent-bright text-body-md ml-1 blink">█</span>
+<div class="ml-auto text-text-dim font-micro text-micro flex items-center gap-1 border border-border-hairline px-2 py-1 bg-surface-container-low">
+<span>⌘</span><span>K</span>
+</div>
+</div>
+<!-- Suggestion Rows -->
+<div class="flex flex-col py-window-bar-y max-h-[300px] overflow-y-auto">
+<!-- Row 1 (Highlighted) -->
+<div class="flex items-center px-container-padding py-3 bg-[rgba(108,106,245,0.15)] border-l-2 border-accent-bright cursor-pointer hover:bg-[rgba(108,106,245,0.20)] transition-colors">
+<span class="text-accent-bright font-metadata-key text-metadata-key mr-4">&gt;</span>
+<span class="text-text-primary">create mod — hide Shorts on youtube.com</span>
+</div>
+<!-- Row 2 -->
+<div class="flex items-center px-container-padding py-3 border-l-2 border-transparent hover:bg-surface-container-low cursor-pointer transition-colors">
+<span class="text-text-dim font-metadata-key text-metadata-key mr-4">?</span>
+<span class="text-text-primary">ask in planning mode</span>
+</div>
+<!-- Row 3 -->
+<div class="flex items-center px-container-padding py-3 border-l-2 border-transparent hover:bg-surface-container-low cursor-pointer transition-colors">
+<span class="text-text-dim font-metadata-key text-metadata-key mr-4">▸</span>
+<span class="text-text-primary">run an agent task</span>
+</div>
+</div>
+<!-- Footer Bar -->
+<div class="flex items-center justify-between px-window-bar-x py-window-bar-y border-t border-border-hairline bg-[#08080F]">
+<span class="text-text-dim font-micro text-micro">↑↓ navigate</span>
+<span class="text-text-dim font-micro text-micro">esc to cancel</span>
+</div>
+</div>
+</body></html>

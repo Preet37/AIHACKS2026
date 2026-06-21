@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>CONJURE Settings</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Silkscreen&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary-fixed-variant": "#3638a2",
+                        "on-primary-fixed": "#0c006a",
+                        "secondary-fixed-dim": "#c0c1ff",
+                        "surface-container": "#1f1f27",
+                        "tertiary-fixed-dim": "#ffb77d",
+                        "on-tertiary": "#4d2600",
+                        "on-surface-variant": "#c7c4d7",
+                        "on-error-container": "#ffdad6",
+                        "on-secondary-fixed": "#06006c",
+                        "surface-container-highest": "#34343c",
+                        "primary-fixed": "#e2dfff",
+                        "on-surface": "#e4e1ec",
+                        "background": "#08080F",
+                        "surface": "#101026",
+                        "error-container": "#93000a",
+                        "surface-container-lowest": "#0e0d15",
+                        "outline-variant": "#464554",
+                        "secondary-fixed": "#e1e0ff",
+                        "on-background": "#e4e1ec",
+                        "text-dim": "#8A8AA4",
+                        "on-secondary-container": "#b0b2ff",
+                        "surface-container-high": "#2a2931",
+                        "on-error": "#690005",
+                        "primary": "#c2c1ff",
+                        "primary-container": "#8382ff",
+                        "on-secondary": "#1d1c8c",
+                        "inverse-surface": "#e4e1ec",
+                        "tertiary-fixed": "#ffdcc3",
+                        "surface-tint": "#c2c1ff",
+                        "on-primary": "#1900a7",
+                        "surface-container-low": "#1b1b23",
+                        "secondary": "#c0c1ff",
+                        "surface-dim": "#13131a",
+                        "on-tertiary-fixed": "#2f1500",
+                        "border-hairline": "rgba(240,240,245,0.14)",
+                        "secondary-container": "#393ba5",
+                        "text-primary": "#F0F0F5",
+                        "on-tertiary-fixed-variant": "#6e3900",
+                        "inverse-primary": "#4d4ad5",
+                        "surface-variant": "#34343c",
+                        "tertiary": "#ffb77d",
+                        "accent-bright": "#6C6AF5",
+                        "surface-bright": "#393841",
+                        "on-primary-fixed-variant": "#342cbd",
+                        "inverse-on-surface": "#303038",
+                        "text-faint": "#54546E",
+                        "outline": "#918fa0",
+                        "on-primary-container": "#150093",
+                        "tertiary-container": "#d57a1d",
+                        "error": "#ffb4ab",
+                        "primary-fixed-dim": "#c2c1ff",
+                        "on-tertiary-container": "#432100"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0px",
+                        "lg": "0px",
+                        "xl": "0px",
+                        "full": "0px"
+                    },
+                    "spacing": {
+                        "window-bar-x": "10px",
+                        "window-bar-y": "6px",
+                        "base": "11px",
+                        "container-padding": "22px",
+                        "block-gap": "20px",
+                        "item-gap": "12px"
+                    },
+                    "fontFamily": {
+                        "display-sm": ["Silkscreen"],
+                        "metadata-key": ["JetBrains Mono"],
+                        "body-md": ["JetBrains Mono"],
+                        "wordmark": ["Silkscreen"],
+                        "display-lg": ["Silkscreen"],
+                        "caption": ["JetBrains Mono"],
+                        "ui-small": ["JetBrains Mono"],
+                        "micro": ["JetBrains Mono"]
+                    },
+                    "fontSize": {
+                        "display-sm": ["15px", { "lineHeight": "1.2", "fontWeight": "400" }],
+                        "metadata-key": ["13px", { "lineHeight": "1.0", "letterSpacing": "0.14em", "fontWeight": "500" }],
+                        "body-md": ["16px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "wordmark": ["46px", { "lineHeight": "1.0", "letterSpacing": "1px", "fontWeight": "400" }],
+                        "display-lg": ["22px", { "lineHeight": "1.2", "fontWeight": "400" }],
+                        "caption": ["11px", { "lineHeight": "1.0", "letterSpacing": "0.1em", "fontWeight": "400" }],
+                        "ui-small": ["12px", { "lineHeight": "1.0", "fontWeight": "400" }],
+                        "micro": ["10px", { "lineHeight": "1.0", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { background-color: #08080F; color: #F0F0F5; }
+        .blinking-cursor { animation: blink 1s step-end infinite; }
+        @keyframes blink { 50% { opacity: 0; } }
+        /* Custom scrollbar for brutalist feel */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #101026; border-left: 1px solid rgba(240,240,245,0.14); }
+        ::-webkit-scrollbar-thumb { background: #464554; }
+        ::-webkit-scrollbar-thumb:hover { background: #6C6AF5; }
+    </style>
+</head>
+<body class="font-body-md antialiased h-screen flex flex-col overflow-hidden">
+<!-- Top Status Bar -->
+<header class="flex h-[40px] items-center px-window-bar-x justify-between border-b border-border-hairline bg-surface shrink-0">
+<div class="font-wordmark text-[18px] text-primary tracking-widest uppercase flex items-center">
+            CONJURE<span class="blinking-cursor ml-1 text-accent-bright">▌</span>
+</div>
+<div class="font-metadata-key text-text-primary tracking-widest absolute left-1/2 transform -translate-x-1/2 hidden md:block">
+            [ SETTINGS ]
+        </div>
+<div class="flex items-center gap-4 text-text-dim">
+<button class="hover:text-accent-bright transition-colors focus:outline-none flex items-center justify-center">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+</button>
+<button class="hover:text-error transition-colors focus:outline-none flex items-center justify-center">
+<span class="material-symbols-outlined text-[18px]">power_settings_new</span>
+</button>
+</div>
+</header>
+<!-- Main Content Area -->
+<main class="flex-1 overflow-y-auto flex flex-col gap-block-gap p-block-gap">
+<!-- Pane 1: Connectors -->
+<section class="border border-border-hairline bg-surface w-full flex flex-col">
+<div class="px-window-bar-x py-window-bar-y border-b border-border-hairline bg-surface-container-low flex justify-between items-center">
+<h2 class="font-caption text-caption text-text-dim uppercase tracking-widest">CONNECTORS</h2>
+<span class="material-symbols-outlined text-text-dim text-[14px]">link</span>
+</div>
+<div class="flex flex-col p-container-padding gap-item-gap">
+<!-- Row: LinkedIn -->
+<div class="flex items-center justify-between group">
+<span class="font-metadata-key text-metadata-key text-text-primary uppercase">LINKEDIN</span>
+<div class="flex items-center gap-6">
+<span class="font-ui-small text-ui-small text-accent-bright flex items-center gap-2">
+<span>■</span> CONNECTED
+                        </span>
+<button class="w-[20px] h-[20px] border border-accent-bright flex items-center justify-center bg-[rgba(108,106,245,0.20)] focus:outline-none transition-colors">
+<div class="w-[8px] h-[8px] bg-accent-bright"></div>
+</button>
+</div>
+</div>
+<!-- Divider -->
+<div class="h-[1px] w-full bg-border-hairline"></div>
+<!-- Row: Gmail -->
+<div class="flex items-center justify-between group">
+<span class="font-metadata-key text-metadata-key text-text-primary uppercase">GMAIL</span>
+<div class="flex items-center gap-6">
+<span class="font-ui-small text-ui-small text-accent-bright flex items-center gap-2">
+<span>■</span> CONNECTED
+                        </span>
+<button class="w-[20px] h-[20px] border border-accent-bright flex items-center justify-center bg-[rgba(108,106,245,0.20)] focus:outline-none transition-colors">
+<div class="w-[8px] h-[8px] bg-accent-bright"></div>
+</button>
+</div>
+</div>
+<!-- Divider -->
+<div class="h-[1px] w-full bg-border-hairline"></div>
+<!-- Row: Calendar -->
+<div class="flex items-center justify-between group">
+<span class="font-metadata-key text-metadata-key text-text-primary uppercase">CALENDAR</span>
+<div class="flex items-center gap-6">
+<span class="font-ui-small text-ui-small text-text-dim flex items-center gap-2">
+<span>□</span> NOT CONNECTED
+                        </span>
+<button class="w-[20px] h-[20px] border border-border-hairline flex items-center justify-center hover:border-accent-bright hover:bg-[rgba(108,106,245,0.10)] focus:outline-none transition-colors">
+<!-- empty inner box for unchecked state -->
+</button>
+</div>
+</div>
+</div>
+</section>
+<!-- Pane 2: Permissions -->
+<section class="border border-border-hairline bg-surface w-full flex flex-col">
+<div class="px-window-bar-x py-window-bar-y border-b border-border-hairline bg-surface-container-low flex justify-between items-center">
+<h2 class="font-caption text-caption text-text-dim uppercase tracking-widest">PERMISSIONS</h2>
+<span class="material-symbols-outlined text-text-dim text-[14px]">admin_panel_settings</span>
+</div>
+<div class="flex flex-col p-container-padding gap-item-gap">
+<!-- Toggle: Allow agents -->
+<div class="flex items-center justify-between group">
+<span class="font-metadata-key text-metadata-key text-text-primary uppercase max-w-[70%] leading-tight">ALLOW AGENTS TO ACT IN AUTHENTICATED TABS</span>
+<button class="w-[40px] h-[20px] border border-border-hairline relative focus:outline-none transition-colors flex-shrink-0 flex items-center px-[2px] bg-surface">
+<div class="w-[14px] h-[14px] bg-text-dim transition-all"></div>
+</button>
+</div>
+<div class="h-[1px] w-full bg-border-hairline"></div>
+<!-- Toggle: Require confirmation -->
+<div class="flex items-center justify-between group">
+<span class="font-metadata-key text-metadata-key text-text-primary uppercase max-w-[70%] leading-tight">REQUIRE CONFIRMATION BEFORE EACH RUN</span>
+<button class="w-[40px] h-[20px] border border-accent-bright relative focus:outline-none transition-colors flex-shrink-0 flex items-center px-[2px] bg-[rgba(108,106,245,0.20)] justify-end">
+<div class="w-[14px] h-[14px] bg-accent-bright transition-all"></div>
+</button>
+</div>
+<div class="h-[1px] w-full bg-border-hairline"></div>
+<!-- Toggle: Voice always listening -->
+<div class="flex items-center justify-between group">
+<span class="font-metadata-key text-metadata-key text-text-primary uppercase max-w-[70%] leading-tight">VOICE ALWAYS-LISTENING</span>
+<button class="w-[40px] h-[20px] border border-border-hairline relative focus:outline-none transition-colors flex-shrink-0 flex items-center px-[2px] bg-surface">
+<div class="w-[14px] h-[14px] bg-text-dim transition-all"></div>
+</button>
+</div>
+</div>
+</section>
+<!-- Pane 3: Mode -->
+<section class="border border-border-hairline bg-surface w-full flex flex-col mb-block-gap">
+<div class="px-window-bar-x py-window-bar-y border-b border-border-hairline bg-surface-container-low flex justify-between items-center">
+<h2 class="font-caption text-caption text-text-dim uppercase tracking-widest">MODE</h2>
+<span class="material-symbols-outlined text-text-dim text-[14px]">tune</span>
+</div>
+<div class="flex p-container-padding">
+<div class="flex w-full">
+<!-- Segment: PLANNING (Selected) -->
+<button class="flex-1 border border-accent-bright bg-accent-bright text-surface-container-lowest font-metadata-key text-metadata-key h-[40px] flex items-center justify-center uppercase tracking-widest focus:outline-none">
+                        PLANNING
+                    </button>
+<!-- Segment: CODING (Unselected) -->
+<button class="flex-1 border-t border-b border-r border-border-hairline bg-surface text-text-dim font-metadata-key text-metadata-key h-[40px] flex items-center justify-center uppercase tracking-widest hover:bg-surface-container hover:text-text-primary transition-colors focus:outline-none">
+                        CODING
+                    </button>
+</div>
+</div>
+</section>
+</main>
+</body></html>

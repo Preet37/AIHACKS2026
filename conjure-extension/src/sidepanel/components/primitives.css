@@ -1,0 +1,600 @@
+/*
+ * Conjure primitives (CONJURE-DESIGN.md §6). Every rule derives from the §2
+ * tokens (tokens.css). Square, hairline, mono, zero radius. The cj- namespace
+ * keeps these independent of the legacy styles.css selectors during migration.
+ */
+
+/* ── StatusBlock (§4) — the ■/□ atom ───────────────────────────────────── */
+.cj-status {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border: 1px solid var(--cj-line);
+  background: var(--cj-dim);
+}
+.cj-status--active {
+  border-color: var(--cj-accent);
+  background: var(--cj-accent);
+}
+.cj-status--done {
+  border-color: var(--cj-line);
+  background: var(--cj-dim);
+}
+.cj-status--pending {
+  border-color: var(--cj-faint);
+  background: transparent; /* hollow □ */
+}
+.cj-status--loud.cj-status--active {
+  border-color: var(--cj-accent-bright);
+  background: var(--cj-accent-bright);
+}
+.cj-status--loud.cj-status--done {
+  border-color: var(--cj-on-loud-dim);
+  background: var(--cj-on-loud-dim);
+}
+.cj-status--loud.cj-status--pending {
+  border-color: var(--cj-line-loud);
+  background: transparent;
+}
+.cj-status--pulse {
+  animation: cj-pulse 1.2s ease-in-out infinite;
+}
+@keyframes cj-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ── StatusBar (§5/§6) — tiling-WM top chrome ──────────────────────────── */
+.cj-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--cj-bar-h);
+  padding: 0 10px;
+  border-bottom: 1px solid var(--cj-line);
+  background: var(--cj-surface);
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+}
+.cj-statusbar__brand {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  background: transparent;
+  color: var(--cj-text);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.cj-statusbar__spaces {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.cj-statusbar__spaces::-webkit-scrollbar {
+  display: none;
+}
+.cj-ws {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--cj-dim);
+  font-size: 10px;
+  cursor: pointer;
+}
+.cj-ws:hover {
+  border-color: var(--cj-line);
+  color: var(--cj-text);
+  background: var(--cj-surface-2);
+}
+.cj-ws__n {
+  color: var(--cj-faint);
+}
+.cj-ws--active {
+  border-color: var(--cj-accent);
+  background: var(--cj-accent-wash);
+  color: var(--cj-accent-bright);
+}
+.cj-ws--active .cj-ws__n {
+  color: var(--cj-accent-bright);
+}
+.cj-statusbar__right {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 160px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.cj-statusbar__status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Pane (§6) ─────────────────────────────────────────────────────────── */
+.cj-pane {
+  border: 1px solid var(--cj-line);
+  background: var(--cj-ground);
+}
+.cj-pane--surface {
+  background: var(--cj-surface);
+}
+.cj-pane__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px var(--cj-pane-pad) 0;
+}
+.cj-pane__name {
+  color: var(--cj-faint);
+  font-size: var(--cj-fs-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.cj-pane__body {
+  display: grid;
+  gap: var(--cj-row-gap);
+  padding: var(--cj-pane-pad);
+}
+
+/* ── Window (§6) — Pane + hairline title bar ───────────────────────────── */
+.cj-window {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid var(--cj-line);
+  background: var(--cj-surface);
+}
+.cj-window__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: var(--cj-bar-h);
+  padding: 0 var(--cj-pane-pad);
+  border-bottom: 1px solid var(--cj-line);
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.cj-window--active .cj-window__bar {
+  border-color: var(--cj-accent);
+}
+.cj-window__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.cj-window__title > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cj-window__controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cj-window__close {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--cj-dim);
+  cursor: pointer;
+}
+.cj-window__close:hover {
+  border-color: var(--cj-line);
+  color: var(--cj-text);
+  background: var(--cj-surface-2);
+}
+.cj-window__body {
+  min-width: 0;
+  padding: var(--cj-pane-pad);
+}
+
+/* ── MetadataBlock (§6) — the signature molecule ───────────────────────── */
+.cj-meta {
+  display: grid;
+  gap: var(--cj-row-gap);
+}
+.cj-meta__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--cj-row-gap) 18px;
+  align-items: start;
+}
+.cj-meta__key {
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.cj-meta__val {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--cj-text);
+  font-size: var(--cj-fs-body);
+}
+.cj-meta__val > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cj-meta--loud .cj-meta__key {
+  color: var(--cj-on-loud-dim);
+}
+.cj-meta--loud .cj-meta__val {
+  color: var(--cj-on-loud);
+}
+
+/* ── Toggle (§6) — 26×13 square ────────────────────────────────────────── */
+.cj-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 26px;
+  height: 13px;
+  padding: 0;
+  border: 1px solid var(--cj-line);
+  background: transparent;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.cj-toggle__knob {
+  width: 9px;
+  height: 9px;
+  margin: 1px;
+  background: var(--cj-faint);
+}
+.cj-toggle--on {
+  justify-content: flex-end;
+  border-color: var(--cj-accent);
+  background: var(--cj-accent-wash);
+}
+.cj-toggle--on .cj-toggle__knob {
+  background: var(--cj-accent);
+}
+
+/* ── Button (§6) ───────────────────────────────────────────────────────── */
+.cj-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 5px 10px;
+  border: 1px solid var(--cj-line);
+  background: transparent;
+  color: var(--cj-text);
+  font-size: var(--cj-fs-body);
+  cursor: pointer;
+}
+.cj-btn:hover {
+  background: var(--cj-surface-2);
+}
+.cj-btn:active {
+  transform: scale(0.98);
+}
+.cj-btn--primary {
+  border-color: var(--cj-accent);
+  color: var(--cj-accent-bright);
+}
+.cj-btn--primary:hover {
+  background: var(--cj-accent-wash);
+}
+.cj-btn--ghost {
+  border-color: transparent;
+  color: var(--cj-dim);
+}
+.cj-btn--ghost:hover {
+  border-color: var(--cj-line);
+  color: var(--cj-text);
+}
+.cj-btn:disabled {
+  border-color: var(--cj-line);
+  color: var(--cj-faint);
+  background: transparent;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.cj-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── ProgressBar (§6) ──────────────────────────────────────────────────── */
+.cj-progress {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+}
+.cj-progress__count {
+  font-variant-numeric: tabular-nums;
+}
+.cj-progress__track {
+  height: 2px;
+  background: var(--cj-line);
+}
+.cj-progress__fill {
+  display: block;
+  height: 100%;
+  background: var(--cj-accent);
+}
+
+/* ── OptionCard (§6) ───────────────────────────────────────────────────── */
+.cj-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 14px;
+  border: 1px solid var(--cj-line);
+  background: transparent;
+  color: var(--cj-dim);
+  text-align: left;
+  cursor: pointer;
+}
+.cj-option + .cj-option {
+  margin-top: -1px;
+}
+.cj-option--selected {
+  position: relative;
+  z-index: 1;
+  border-color: var(--cj-accent);
+  background: var(--cj-accent-wash);
+  color: var(--cj-text);
+}
+.cj-option__text {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.cj-option__title {
+  color: var(--cj-text);
+  font-size: var(--cj-fs-body);
+  font-weight: var(--cj-w-medium);
+}
+.cj-option__desc {
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+  line-height: 1.25;
+}
+
+/* ── CommandInput (§6) ─────────────────────────────────────────────────── */
+.cj-cmd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--cj-bar-h);
+  padding: 0 var(--cj-pane-pad);
+  border-top: 1px solid var(--cj-line);
+  background: var(--cj-ground);
+}
+.cj-cmd--large {
+  min-height: 54px;
+  padding: 0 18px;
+  border-top: 0;
+}
+.cj-cmd__marker {
+  flex: 0 0 auto;
+  color: var(--cj-accent-bright);
+  font-size: var(--cj-fs-body);
+}
+.cj-cmd__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cj-text);
+  font: inherit;
+  caret-color: var(--cj-accent);
+  outline: none;
+}
+.cj-cmd--large .cj-cmd__input {
+  font-size: var(--cj-fs-label);
+}
+.cj-cmd__input::placeholder {
+  color: var(--cj-faint);
+}
+.cj-cmd__mic {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--cj-dim);
+  cursor: pointer;
+}
+.cj-cmd__mic:hover {
+  border-color: var(--cj-line);
+  color: var(--cj-text);
+}
+.cj-cmd__mic svg {
+  width: 14px;
+  height: 14px;
+}
+.cj-cmd__chip {
+  flex: 0 0 auto;
+  padding: 1px 4px;
+  border: 1px solid var(--cj-line);
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+}
+
+/* ── SelectionOverlay (§6) ─────────────────────────────────────────────── */
+.cj-selection {
+  position: relative;
+  border: 1px solid var(--cj-accent);
+}
+.cj-selection__toolbar {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+  padding: 5px 7px;
+  border: 1px solid var(--cj-line);
+  background: var(--cj-surface);
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+  transform: translateX(-50%);
+}
+.cj-selection__tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.cj-selection__tool:hover {
+  border-color: var(--cj-line);
+  color: var(--cj-text);
+}
+.cj-selection__tool svg {
+  width: 13px;
+  height: 13px;
+}
+.cj-selection__handle {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  background: var(--cj-accent);
+}
+.cj-selection__handle--tl {
+  top: -4px;
+  left: -4px;
+}
+.cj-selection__handle--tr {
+  top: -4px;
+  right: -4px;
+}
+.cj-selection__handle--bl {
+  bottom: -4px;
+  left: -4px;
+}
+.cj-selection__handle--br {
+  right: -4px;
+  bottom: -4px;
+}
+
+/* ── NeofetchSplash (§6, loud) ─────────────────────────────────────────── */
+.cj-splash {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(28px, 7vw, 80px);
+  padding: 24px;
+  background: var(--cj-loud);
+}
+.cj-splash__mark {
+  display: grid;
+  grid-template-columns: repeat(4, 26px);
+  grid-template-rows: repeat(5, 26px);
+  gap: 3px;
+}
+.cj-splash__px {
+  background: transparent;
+}
+.cj-splash__px--on {
+  background: var(--cj-on-loud);
+}
+.cj-splash__readout {
+  display: grid;
+  gap: 22px;
+  min-width: 260px;
+}
+.cj-splash__wordmark {
+  margin: 0;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--cj-line-loud);
+  color: var(--cj-on-loud);
+  font-family: var(--cj-font-pixel);
+  font-size: var(--cj-fs-hero);
+  font-weight: var(--cj-w-regular);
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+.cj-splash__palette {
+  display: flex;
+  gap: 8px;
+  padding-top: 20px;
+  border-top: 1px solid var(--cj-line-loud);
+}
+.cj-splash__palette span {
+  width: 32px;
+  height: 22px;
+  border: 1px solid var(--cj-line-loud);
+}
+
+.cj-splash__palette span:nth-child(1) {
+  background: var(--cj-ground);
+}
+.cj-splash__palette span:nth-child(2) {
+  background: var(--cj-surface);
+}
+.cj-splash__palette span:nth-child(3) {
+  background: var(--cj-dim);
+}
+.cj-splash__palette span:nth-child(4) {
+  background: var(--cj-text);
+}
+.cj-splash__palette span:nth-child(5) {
+  background: var(--cj-accent);
+}
+
+/* ── Shared keyboard focus (§8) — visible accent ring everywhere ───────── */
+.cj-btn:focus-visible,
+.cj-toggle:focus-visible,
+.cj-ws:focus-visible,
+.cj-option:focus-visible,
+.cj-window__close:focus-visible,
+.cj-cmd__input:focus-visible,
+.cj-cmd__mic:focus-visible,
+.cj-statusbar__brand:focus-visible,
+.cj-selection__tool:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--cj-accent);
+}
+
+/* ── Reduced motion (§8) — the static aesthetic must stay fully readable ── */
+@media (prefers-reduced-motion: reduce) {
+  .cj-status--pulse {
+    animation: none;
+  }
+}

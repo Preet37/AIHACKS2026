@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Conjure - Design Mode</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Silkscreen&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+                "surface-variant": "#34343c",
+                "tertiary-fixed-dim": "#ffb77d",
+                "inverse-primary": "#4d4ad5",
+                "tertiary": "#ffb77d",
+                "on-error": "#690005",
+                "surface": "#101026",
+                "primary": "#c2c1ff",
+                "tertiary-fixed": "#ffdcc3",
+                "outline": "#918fa0",
+                "surface-tint": "#c2c1ff",
+                "border-hairline": "rgba(240,240,245,0.14)",
+                "primary-fixed": "#e2dfff",
+                "on-secondary-container": "#b0b2ff",
+                "surface-container": "#1f1f27",
+                "secondary-fixed-dim": "#c0c1ff",
+                "text-primary": "#F0F0F5",
+                "surface-container-highest": "#34343c",
+                "text-dim": "#8A8AA4",
+                "surface-dim": "#13131a",
+                "primary-fixed-dim": "#c2c1ff",
+                "on-tertiary-fixed-variant": "#6e3900",
+                "primary-container": "#8382ff",
+                "outline-variant": "#464554",
+                "error-container": "#93000a",
+                "surface-container-high": "#2a2931",
+                "on-tertiary": "#4d2600",
+                "on-surface": "#e4e1ec",
+                "secondary-fixed": "#e1e0ff",
+                "on-error-container": "#ffdad6",
+                "on-tertiary-container": "#432100",
+                "on-primary-fixed-variant": "#342cbd",
+                "on-secondary-fixed-variant": "#3638a2",
+                "on-primary-fixed": "#0c006a",
+                "accent-bright": "#ADABFF",
+                "error": "#ffb4ab",
+                "on-primary-container": "#150093",
+                "tertiary-container": "#d57a1d",
+                "surface-bright": "#393841",
+                "background": "#13131a",
+                "on-secondary": "#1d1c8c",
+                "on-tertiary-fixed": "#2f1500",
+                "on-primary": "#1900a7",
+                "inverse-surface": "#e4e1ec",
+                "text-faint": "#54546E",
+                "on-surface-variant": "#c7c4d7",
+                "surface-container-low": "#1b1b23",
+                "secondary": "#c0c1ff",
+                "inverse-on-surface": "#303038",
+                "on-secondary-fixed": "#06006c",
+                "surface-container-lowest": "#0e0d15",
+                "secondary-container": "#393ba5",
+                "on-background": "#e4e1ec"
+        },
+        "borderRadius": {
+                "DEFAULT": "0px",
+                "lg": "0px",
+                "xl": "0px",
+                "full": "0px"
+        },
+        "spacing": {
+                "container-padding": "22px",
+                "window-bar-y": "6px",
+                "window-bar-x": "10px",
+                "block-gap": "20px",
+                "base": "11px",
+                "item-gap": "12px"
+        },
+        "fontFamily": {
+                "micro": [
+                        "JetBrains Mono"
+                ],
+                "caption": [
+                        "JetBrains Mono"
+                ],
+                "ui-small": [
+                        "JetBrains Mono"
+                ],
+                "display-lg": [
+                        "Silkscreen"
+                ],
+                "display-sm": [
+                        "Silkscreen"
+                ],
+                "wordmark": [
+                        "Silkscreen"
+                ],
+                "metadata-key": [
+                        "JetBrains Mono"
+                ],
+                "body-md": [
+                        "JetBrains Mono"
+                ]
+        },
+        "fontSize": {
+                "micro": [
+                        "10px",
+                        {
+                                "lineHeight": "1.0",
+                                "fontWeight": "400"
+                        }
+                ],
+                "caption": [
+                        "11px",
+                        {
+                                "lineHeight": "1.0",
+                                "letterSpacing": "0.1em",
+                                "fontWeight": "400"
+                        }
+                ],
+                "ui-small": [
+                        "12px",
+                        {
+                                "lineHeight": "1.0",
+                                "fontWeight": "400"
+                        }
+                ],
+                "display-lg": [
+                        "22px",
+                        {
+                                "lineHeight": "1.2",
+                                "fontWeight": "400"
+                        }
+                ],
+                "display-sm": [
+                        "15px",
+                        {
+                                "lineHeight": "1.2",
+                                "fontWeight": "400"
+                        }
+                ],
+                "wordmark": [
+                        "46px",
+                        {
+                                "lineHeight": "1.0",
+                                "letterSpacing": "1px",
+                                "fontWeight": "400"
+                        }
+                ],
+                "metadata-key": [
+                        "13px",
+                        {
+                                "lineHeight": "1.0",
+                                "letterSpacing": "0.14em",
+                                "fontWeight": "500"
+                        }
+                ],
+                "body-md": [
+                        "16px",
+                        {
+                                "lineHeight": "1.5",
+                                "fontWeight": "400"
+                        }
+                ]
+        }
+},
+    },
+  }
+</script>
+<style>
+  body {
+    background-color: #08080F;
+    color: #F0F0F5;
+    font-family: 'JetBrains Mono', monospace;
+    overflow: hidden;
+  }
+  .accent-indigo {
+    color: #6C6AF5;
+  }
+  .bg-accent-indigo {
+    background-color: #6C6AF5;
+  }
+  .border-accent-indigo {
+    border-color: #6C6AF5;
+  }
+  .selection-handle {
+    width: 6px;
+    height: 6px;
+    background-color: #6C6AF5;
+    position: absolute;
+  }
+  input[type="range"] {
+    -webkit-appearance: none;
+    width: 100%;
+    background: transparent;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+  }
+  input[type="range"]:focus {
+    outline: none;
+  }
+  input[type="range"]::-ms-track {
+    width: 100%;
+    cursor: pointer;
+    background: transparent; 
+    border-color: transparent;
+    color: transparent;
+  }
+  .slider-track {
+    height: 2px;
+    background: rgba(240,240,245,0.14);
+    position: relative;
+    width: 100%;
+  }
+  .slider-fill {
+    height: 100%;
+    background: #6C6AF5;
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+  .slider-thumb {
+    width: 8px;
+    height: 16px;
+    background: #F0F0F5;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    cursor: ew-resize;
+  }
+</style>
+</head>
+<body class="h-screen w-screen flex flex-col">
+<!-- Top Bar -->
+<div class="h-[40px] flex items-center justify-between px-window-bar-x border-b border-border-hairline bg-surface shrink-0">
+<div class="flex items-center gap-4">
+<span class="font-display-sm text-display-sm accent-indigo">CONJURE</span>
+<span class="font-caption text-caption text-text-dim">design mode</span>
+</div>
+<div class="flex items-center gap-4 text-text-dim">
+<span class="material-symbols-outlined text-[16px] cursor-pointer hover:text-text-primary transition-colors">settings</span>
+<span class="material-symbols-outlined text-[16px] cursor-pointer hover:text-text-primary transition-colors">view_sidebar</span>
+</div>
+</div>
+<!-- Main Content -->
+<div class="flex-1 flex overflow-hidden">
+<!-- Left Pane: Canvas -->
+<div class="flex-1 relative bg-[#08080F] flex items-center justify-center p-8">
+<!-- Canvas Grid Pattern -->
+<div class="absolute inset-0 opacity-[0.03]" style="background-image: radial-gradient(#F0F0F5 1px, transparent 1px); background-size: 20px 20px;"></div>
+<!-- Simulated Website Canvas -->
+<div class="relative w-[800px] h-[600px] bg-surface border border-border-hairline overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+<!-- Mock Website Content -->
+<div class="p-12 h-full flex flex-col justify-center">
+<h1 class="font-body-md text-[32px] text-text-primary mb-6">User Profile</h1>
+<p class="font-ui-small text-text-dim mb-12 max-w-md">Review the activity and current status of the selected user entity. Ensure all parameters align with operational requirements before initiating follow up sequences.</p>
+<!-- Selected Button Element -->
+<div class="relative inline-block mt-auto group">
+<!-- Floating Toolbar -->
+<div class="absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-surface border border-border-hairline px-2 py-1 z-10 opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-[14px] text-text-dim hover:text-text-primary cursor-pointer">drag_indicator</span>
+<span class="material-symbols-outlined text-[14px] text-text-dim hover:text-text-primary cursor-pointer">text_fields</span>
+<span class="material-symbols-outlined text-[14px] text-text-dim hover:text-text-primary cursor-pointer">palette</span>
+<span class="material-symbols-outlined text-[14px] text-error hover:text-error-container cursor-pointer">delete</span>
+</div>
+<!-- Button Selection Outline -->
+<div class="absolute inset-0 border border-accent-indigo pointer-events-none -m-[1px]"></div>
+<!-- Selection Handles -->
+<div class="selection-handle -top-[3px] -left-[3px]"></div>
+<div class="selection-handle -top-[3px] -right-[3px]"></div>
+<div class="selection-handle -bottom-[3px] -left-[3px]"></div>
+<div class="selection-handle -bottom-[3px] -right-[3px]"></div>
+<!-- The Button Itself -->
+<button class="bg-accent-indigo text-white font-ui-small px-6 py-3 uppercase tracking-wider relative z-0">
+            Follow up
+          </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Pane: Inspector -->
+<div class="w-[380px] bg-surface border-l border-border-hairline flex flex-col shrink-0">
+<!-- Inspector Window Bar -->
+<div class="h-[32px] flex items-center justify-between px-window-bar-x border-b border-border-hairline bg-surface-container-highest">
+<div class="flex items-center gap-2">
+<span class="text-accent-bright font-caption text-caption text-[10px]">■</span>
+<span class="font-caption text-caption uppercase text-text-primary">inspector — button</span>
+</div>
+<span class="material-symbols-outlined text-[14px] text-text-dim cursor-pointer hover:text-text-primary">close</span>
+</div>
+<!-- Inspector Content -->
+<div class="flex-1 overflow-y-auto p-4 space-y-6">
+<!-- Label Row -->
+<div class="flex flex-col gap-2">
+<label class="font-metadata-key text-metadata-key text-text-dim uppercase">Label</label>
+<input class="bg-surface-dim border border-border-hairline text-text-primary font-ui-small px-3 py-2 w-full focus:border-accent-indigo focus:ring-0 outline-none" type="text" value="Follow up"/>
+</div>
+<!-- Fill Row -->
+<div class="flex flex-col gap-2">
+<label class="font-metadata-key text-metadata-key text-text-dim uppercase">Fill</label>
+<div class="flex flex-wrap gap-2">
+<div class="w-6 h-6 bg-transparent border border-border-hairline cursor-pointer hover:border-text-dim relative">
+<div class="absolute inset-0 m-auto w-4 h-[1px] bg-error rotate-45"></div>
+</div>
+<div class="w-6 h-6 bg-[#08080F] border border-border-hairline cursor-pointer hover:border-text-dim"></div>
+<div class="w-6 h-6 bg-[#101026] border border-border-hairline cursor-pointer hover:border-text-dim"></div>
+<div class="w-6 h-6 bg-[#1f1f27] border border-border-hairline cursor-pointer hover:border-text-dim"></div>
+<div class="w-6 h-6 bg-[#34343c] border border-border-hairline cursor-pointer hover:border-text-dim"></div>
+<div class="w-6 h-6 bg-[#6C6AF5] border border-white cursor-pointer relative">
+<!-- Selected indicator -->
+</div>
+<div class="w-6 h-6 bg-[#F0F0F5] border border-border-hairline cursor-pointer hover:border-text-dim"></div>
+</div>
+</div>
+<!-- Padding Row -->
+<div class="flex flex-col gap-3">
+<div class="flex items-center justify-between">
+<label class="font-metadata-key text-metadata-key text-text-dim uppercase">Padding</label>
+<span class="font-ui-small text-text-primary">24px</span>
+</div>
+<div class="h-6 flex items-center">
+<div class="slider-track">
+<div class="slider-fill" style="width: 40%;"></div>
+<div class="slider-thumb" style="left: 40%;"></div>
+</div>
+</div>
+</div>
+<!-- OnClick Row -->
+<div class="flex flex-col gap-2">
+<label class="font-metadata-key text-metadata-key text-text-dim uppercase">OnClick</label>
+<div class="bg-surface-dim border border-border-hairline p-3 cursor-pointer hover:border-accent-indigo transition-colors flex items-center gap-2">
+<span class="accent-indigo font-ui-small">▸ run agent: linkedin</span>
+</div>
+</div>
+<!-- Additional Layout Settings to flesh out the inspector -->
+<div class="pt-4 border-t border-border-hairline mt-4">
+<div class="flex items-center justify-between mb-4">
+<label class="font-metadata-key text-metadata-key text-text-dim uppercase">Layout</label>
+<span class="material-symbols-outlined text-[14px] text-text-dim">add</span>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<div class="flex flex-col gap-1">
+<span class="font-caption text-caption text-text-faint">Width</span>
+<div class="bg-surface-dim border border-border-hairline px-2 py-1 font-ui-small text-text-primary flex justify-between">
+<span>Auto</span>
+<span class="text-text-dim">px</span>
+</div>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-caption text-caption text-text-faint">Height</span>
+<div class="bg-surface-dim border border-border-hairline px-2 py-1 font-ui-small text-text-primary flex justify-between">
+<span>48</span>
+<span class="text-text-dim">px</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body></html>

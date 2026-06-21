@@ -1,0 +1,249 @@
+/*
+ * Invoke surface styles — CommandPalette, Composer, PlanningPanel.
+ * All values from tokens.css (§2). Zero hardcoded hex/radius/font.
+ * Imported once from CommandPalette.tsx.
+ */
+
+/* ── CommandPalette overlay ─────────────────────────────────────────────── */
+
+/* Dimmed backdrop — no blur, no shadow */
+.cj-invoke-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: color-mix(in srgb, var(--cj-ground) 72%, transparent);
+}
+
+/* Palette container — flat, hairline border, no shadow */
+.cj-invoke-palette {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, 92vw);
+  border: 1px solid var(--cj-line-strong);
+  background: var(--cj-surface);
+}
+
+/* Large CommandInput sits flush at the top of the palette */
+.cj-invoke-palette .cj-cmd--large {
+  border-top: 0;
+  border-bottom: 1px solid var(--cj-line);
+}
+
+/* Suggestion rows list */
+.cj-invoke-rows {
+  display: grid;
+  gap: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Individual suggestion row */
+.cj-invoke-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px var(--cj-pane-pad);
+  border: 0;
+  border-bottom: 1px solid var(--cj-line);
+  background: transparent;
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-body);
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+
+.cj-invoke-row:last-child {
+  border-bottom: 0;
+}
+
+.cj-invoke-row:hover {
+  background: var(--cj-surface-2);
+  color: var(--cj-text);
+}
+
+/* First row highlighted: accent-wash bg + 1px accent left edge */
+.cj-invoke-row--active {
+  position: relative;
+  background: var(--cj-accent-wash);
+  color: var(--cj-text);
+  border-left: 1px solid var(--cj-accent);
+}
+
+.cj-invoke-row__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cj-invoke-row__hint {
+  flex: 0 0 auto;
+  color: var(--cj-faint);
+  font-size: var(--cj-fs-micro);
+  letter-spacing: 0.06em;
+}
+
+/* Footer nav hints */
+.cj-invoke-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 7px var(--cj-pane-pad);
+  border-top: 1px solid var(--cj-line);
+  color: var(--cj-faint);
+  font-size: var(--cj-fs-micro);
+  letter-spacing: 0.06em;
+}
+
+.cj-invoke-footer__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--cj-dim);
+}
+
+.cj-invoke-footer__key kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid var(--cj-line);
+  background: transparent;
+  color: var(--cj-dim);
+  font: inherit;
+  font-size: var(--cj-fs-micro);
+}
+
+/* Keyboard focus for suggestion rows */
+.cj-invoke-row:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--cj-accent);
+}
+
+/* ── Composer (persistent bottom bar) ──────────────────────────────────── */
+
+/* The composer wraps CommandInput — the primitive handles all internal styling.
+   We just ensure it sits flush at the panel foot with a top hairline. */
+.cj-composer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--cj-line);
+}
+
+/* CommandInput inside composer: no double top border */
+.cj-composer .cj-cmd {
+  border-top: 0;
+}
+
+/* ── PlanningPanel ──────────────────────────────────────────────────────── */
+
+.cj-planning {
+  display: grid;
+  gap: 0;
+  height: 100%;
+  background: var(--cj-ground);
+  overflow-y: auto;
+}
+
+/* Goal bar: key/value row across the full width */
+.cj-planning__goal {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--cj-row-gap) 18px;
+  align-items: baseline;
+  padding: var(--cj-pane-pad);
+  border-bottom: 1px solid var(--cj-line);
+}
+
+.cj-planning__goal-key {
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.cj-planning__goal-val {
+  color: var(--cj-text);
+  font-size: var(--cj-fs-body);
+  font-weight: var(--cj-w-medium);
+  word-break: break-word;
+}
+
+/* Question line: accent ■ + prose */
+.cj-planning__question {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: var(--cj-pane-pad);
+  border-bottom: 1px solid var(--cj-line);
+  color: var(--cj-text);
+  font-size: var(--cj-fs-body);
+}
+
+/* Option stack: OptionCard primitives stacked flush */
+.cj-planning__options {
+  display: grid;
+  gap: 0;
+}
+
+/* Custom input row below the option cards */
+.cj-planning__custom {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: var(--cj-pane-pad);
+  border-top: 1px solid var(--cj-line);
+}
+
+.cj-planning__custom-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cj-text);
+  font: inherit;
+  font-size: var(--cj-fs-body);
+  caret-color: var(--cj-accent);
+  outline: none;
+}
+
+.cj-planning__custom-input::placeholder {
+  color: var(--cj-faint);
+}
+
+.cj-planning__custom-input:focus-visible {
+  box-shadow: 0 0 0 1px var(--cj-accent);
+}
+
+/* Footer: selected option label + build button */
+.cj-planning__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px var(--cj-pane-pad);
+  border-top: 1px solid var(--cj-line);
+  color: var(--cj-dim);
+  font-size: var(--cj-fs-micro);
+}
+
+.cj-planning__footer-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cj-dim);
+  letter-spacing: 0.06em;
+}
+
+/* Reduced motion: no caret-color flicker (static caret already handles this) */
+@media (prefers-reduced-motion: reduce) {
+  .cj-planning__custom-input {
+    caret-color: var(--cj-accent);
+  }
+}

@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@sentry/browser": "^10.56.0",
     "conjure-workspace": "file:..",
     "lucide-react": "^1.21.0",

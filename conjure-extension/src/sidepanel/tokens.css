@@ -1,0 +1,56 @@
+/*
+ * Conjure design tokens — the contract (CONJURE-DESIGN.md §2).
+ * Single source of truth. Nothing else in the codebase hardcodes a hex,
+ * a radius, or a font stack. JetBrains Mono is self-hosted via
+ * @fontsource/jetbrains-mono (imported in main.tsx). No pixel face is
+ * bundled: --cj-font-pixel falls back to mono, and the splash identity is
+ * carried by the hand-built CSS pixel mark.
+ */
+
+:root {
+  /* grounds */
+  --cj-ground:        #08080F; /* working surface — all dense chrome */
+  --cj-surface:       #101026; /* raised panes, inputs, windows */
+  --cj-surface-2:     #16163A; /* hover / nested surface */
+  --cj-loud:          #222290; /* royal indigo — splash & empty states ONLY */
+
+  /* text */
+  --cj-text:          #F0F0F5;
+  --cj-dim:           #8A8AA4;
+  --cj-faint:         #54546E;
+  --cj-on-loud:       #FFFFFF; /* text on --cj-loud */
+  --cj-on-loud-dim:   #B9B9E6;
+
+  /* accent — load-bearing, STATE ONLY */
+  --cj-accent:        #6C6AF5;
+  --cj-accent-bright: #ADABFF; /* accent shown on --cj-loud */
+  --cj-accent-wash:   rgba(108, 106, 245, 0.16); /* active toggle / highlighted row */
+
+  /* lines */
+  --cj-line:          rgba(240, 240, 245, 0.14);
+  --cj-line-strong:   rgba(240, 240, 245, 0.28);
+  --cj-line-loud:     rgba(255, 255, 255, 0.22); /* hairlines on --cj-loud */
+
+  /* shape */
+  --cj-radius: 0; /* always. there are no rounded corners in Conjure. */
+
+  /* type */
+  --cj-font-mono:  'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+  --cj-font-pixel: 'Departure Mono', 'Silkscreen', monospace; /* wordmark + splash only */
+
+  /* type scale */
+  --cj-fs-micro: 11px; /* metadata keys, hints, footer */
+  --cj-fs-body:  13px; /* default UI text, rows, logs */
+  --cj-fs-label: 16px; /* pane / section emphasis */
+  --cj-fs-title: 22px; /* window + screen titles */
+  --cj-fs-hero:  44px; /* CONJURE wordmark (pixel) */
+
+  /* weights — only two */
+  --cj-w-regular: 400;
+  --cj-w-medium:  500;
+
+  /* spacing */
+  --cj-pane-pad: 12px;
+  --cj-row-gap:  6px;
+  --cj-bar-h:    34px; /* status bar + command bar height */
+}
